@@ -11,7 +11,12 @@ import sys
 from pathlib import Path
 
 from .config import load_config, save_config
-from .diagnostics import collect_diagnostics, diagnostics_json, render_diagnostics
+from .diagnostics import (
+    collect_diagnostics,
+    diagnostics_json,
+    render_controller_wake,
+    render_diagnostics,
+)
 from .lifecycle import LogindWatcher, handle_event
 from .pairing import pair_device
 from .paths import AppPaths
@@ -53,6 +58,24 @@ def _parser() -> argparse.ArgumentParser:
 
     diagnose = sub.add_parser("diagnose", help="show read-only hardware and service diagnostics")
     diagnose.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
+    test = sub.add_parser("test", help="run terminal-first TV and USB wake verification")
+    test_sub = test.add_subparsers(dest="test_name", required=True)
+    test_sub.add_parser("power-on", help="test the safe TV power-on path")
+    test_sub.add_parser("power-off", help="test the safe TV power-off path")
+    power_cycle = test_sub.add_parser("power-cycle", help="turn the TV off, wait, then turn it on")
+    power_cycle.add_argument("--off-seconds", type=float, default=5.0)
+    test_input = test_sub.add_parser("input", help="send and confirm one discrete HDMI command")
+    test_input.add_argument("number", type=int, choices=[1, 2, 3, 4])
+    test_input.add_argument("--save", action="store_true", help="save this input after confirmation")
+    test_sub.add_parser("usb-wake", help="show each controller's USB root wake state")
+    test_key = test_sub.add_parser("key", help="send one raw Android TV key for troubleshooting")
+    test_key.add_argument("key_code", help="for example WAKEUP, SLEEP, POWER, or TV_INPUT_HDMI_1")
+    test_key.add_argument(
+        "--force",
+        action="store_true",
+        help="required for the unsafe POWER toggle",
+    )
 
     service = sub.add_parser("service", help="manage the per-user lifecycle watcher")
     service.add_argument("action", choices=["install", "remove", "status", "logs"])
@@ -123,6 +146,69 @@ async def _tv_command(args: argparse.Namespace, paths: AppPaths) -> int:
     raise ValueError(args.command)
 
 
+async def _test_command(args: argparse.Namespace, paths: AppPaths) -> int:
+    if args.test_name == "usb-wake":
+        report = await collect_diagnostics(paths)
+        print(render_controller_wake(report))
+        wake_paths = report.get("controller_wake_paths", [])
+        return 0 if wake_paths and all(item["root_armed"] for item in wake_paths) else 1
+
+    config = load_config(paths)
+    controller = TVController(config, paths)
+
+    if args.test_name == "power-on":
+        result = await controller.set_power(True)
+        print(result.message)
+        return 0 if result.success else 1
+    if args.test_name == "power-off":
+        result = await controller.set_power(False)
+        print(result.message)
+        return 0 if result.success else 1
+    if args.test_name == "power-cycle":
+        status = await controller.status()
+        if status.is_on is None:
+            raise TVControlError(
+                "TV power state is unknown, so an automatic POWER toggle would be unsafe. "
+                "Try 'atv-couch-wake test key WAKEUP' first."
+            )
+        if status.is_on:
+            off = await controller.set_power(False)
+            print(off.message)
+            if not off.success:
+                return 1
+            delay = max(1.0, args.off_seconds)
+            print(f"Waiting {delay:g} seconds before the power-on test...")
+            await asyncio.sleep(delay)
+        on = await controller.set_power(True)
+        print(on.message)
+        return 0 if on.success else 1
+    if args.test_name == "input":
+        await controller.select_input(args.number)
+        print(f"Sent TV_INPUT_HDMI_{args.number}.")
+        answer = input(f"Did the TV switch to HDMI {args.number}? [y/N] ").strip().casefold()
+        worked = answer in {"y", "yes"}
+        if worked and args.save:
+            config.tv.hdmi_input = args.number
+            config.behavior.switch_input_after_wake = True
+            save_config(config, paths)
+            print(f"Saved HDMI {args.number} as the automatic PC input.")
+        elif worked:
+            print("Input command confirmed. Re-run with --save to store it.")
+        else:
+            print("Input command was not confirmed; configuration was not changed.")
+        return 0 if worked else 1
+    if args.test_name == "key":
+        key_code = args.key_code.strip().upper()
+        if key_code in {"POWER", "KEYCODE_POWER"} and not args.force:
+            raise TVControlError(
+                "POWER is a blind toggle in raw-key mode. Add --force only while watching the TV."
+            )
+        await controller.send_key(key_code)
+        print(f"Sent raw key {key_code}.")
+        return 0
+    raise ValueError(args.test_name)
+
+
 async def _run_async(args: argparse.Namespace, paths: AppPaths) -> int:
     if args.command == "setup":
         ui = select_ui(args.ui)
@@ -136,6 +222,8 @@ async def _run_async(args: argparse.Namespace, paths: AppPaths) -> int:
         report = await collect_diagnostics(paths)
         print(diagnostics_json(report) if args.json else render_diagnostics(report))
         return 0
+    if args.command == "test":
+        return await _test_command(args, paths)
     if args.command == "event":
         result = await handle_event(args.name, paths=paths)
         print(result.message)
@@ -232,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     except UserCancelled:
         print("Cancelled.", file=sys.stderr)
         return 2
-    except (TVControlError, PairingRequired, FileNotFoundError, RuntimeError) as exc:
+    except (TVControlError, PairingRequired, FileNotFoundError, RuntimeError, ValueError) as exc:
         LOGGER.debug("Command failed", exc_info=True)
         print(f"Error: {exc}", file=sys.stderr)
         return 1

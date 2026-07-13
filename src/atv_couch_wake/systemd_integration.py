@@ -82,6 +82,9 @@ def install_user_service(paths: AppPaths | None = None, *, start: bool = True) -
         command.append("--now")
     command.append(UNIT_NAME)
     _run_systemctl(*command, check=True)
+    if start:
+        # enable --now does not restart an already-running watcher after an upgrade.
+        _run_systemctl("restart", UNIT_NAME, check=True)
     return paths.user_unit_file
 
 

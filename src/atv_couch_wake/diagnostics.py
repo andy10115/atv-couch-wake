@@ -22,6 +22,19 @@ class InputDevice:
     handlers: str
 
 
+@dataclass(frozen=True)
+class ControllerWakePath:
+    name: str
+    phys: str
+    event: str
+    usb_device: str
+    usb_root: str
+    usb_root_wakeup: str
+    pci_controller: str
+    pci_wakeup: str
+    root_armed: bool
+
+
 def parse_input_devices(text: str) -> list[InputDevice]:
     devices: list[InputDevice] = []
     for block in re.split(r"\n\s*\n", text.strip()):
@@ -58,6 +71,98 @@ def _wakeup_entries(base: Path) -> list[dict[str, str]]:
     return entries
 
 
+def _read_wakeup(device_path: Path | None) -> str:
+    if device_path is None:
+        return "not-found"
+    wake_file = device_path / "power/wakeup"
+    try:
+        return wake_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unavailable"
+
+
+def _first_matching_ancestor(path: Path, pattern: str) -> Path | None:
+    regex = re.compile(pattern, re.IGNORECASE)
+    for candidate in (path, *path.parents):
+        if regex.fullmatch(candidate.name):
+            return candidate
+    return None
+
+
+def _event_handler(device: InputDevice) -> str:
+    return next((part for part in device.handlers.split() if re.fullmatch(r"event\d+", part)), "")
+
+
+def _root_from_phys(phys: str, usb_base: Path) -> tuple[Path | None, Path | None]:
+    match = re.search(r"usb-(?P<pci>[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7])-", phys, re.I)
+    if not match or not usb_base.exists():
+        return None, None
+    pci_name = match.group("pci").lower()
+    for root_link in sorted(usb_base.glob("usb*")):
+        try:
+            resolved = root_link.resolve()
+        except OSError:
+            continue
+        if any(parent.name.lower() == pci_name for parent in (resolved, *resolved.parents)):
+            pci = _first_matching_ancestor(resolved, r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]")
+            return root_link, pci
+    return None, None
+
+
+def controller_wake_paths(
+    devices: list[InputDevice],
+    *,
+    input_base: Path = Path("/sys/class/input"),
+    usb_base: Path = Path("/sys/bus/usb/devices"),
+    pci_base: Path = Path("/sys/bus/pci/devices"),
+) -> list[ControllerWakePath]:
+    """Resolve likely controllers to their USB root hub and PCI parent wake state."""
+    results: list[ControllerWakePath] = []
+    for device in likely_controllers(devices):
+        event = _event_handler(device)
+        resolved: Path | None = None
+        if event:
+            try:
+                resolved = (input_base / event / "device").resolve(strict=True)
+            except OSError:
+                resolved = None
+
+        usb_device_path = _first_matching_ancestor(resolved, r"\d+-\d+(?:\.\d+)*") if resolved else None
+        usb_root_path = _first_matching_ancestor(resolved, r"usb\d+") if resolved else None
+        pci_path = (
+            _first_matching_ancestor(resolved, r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]")
+            if resolved
+            else None
+        )
+
+        if usb_root_path is None:
+            fallback_root, fallback_pci = _root_from_phys(device.phys, usb_base)
+            usb_root_path = fallback_root
+            pci_path = pci_path or fallback_pci
+
+        usb_root_name = usb_root_path.name if usb_root_path else "not-found"
+        pci_name = pci_path.name if pci_path else "not-found"
+        usb_root_lookup = usb_base / usb_root_name if usb_root_name != "not-found" else None
+        pci_lookup = pci_base / pci_name if pci_name != "not-found" else None
+        root_state = _read_wakeup(usb_root_lookup or usb_root_path)
+        pci_state = _read_wakeup(pci_lookup or pci_path)
+
+        results.append(
+            ControllerWakePath(
+                name=device.name,
+                phys=device.phys,
+                event=event or "not-found",
+                usb_device=usb_device_path.name if usb_device_path else "not-found",
+                usb_root=usb_root_name,
+                usb_root_wakeup=root_state,
+                pci_controller=pci_name,
+                pci_wakeup=pci_state,
+                root_armed=root_state == "enabled",
+            )
+        )
+    return results
+
+
 async def collect_diagnostics(paths: AppPaths | None = None) -> dict[str, Any]:
     paths = paths or AppPaths.from_environment()
     platform = inspect_platform()
@@ -83,8 +188,10 @@ async def collect_diagnostics(paths: AppPaths | None = None) -> dict[str, Any]:
         text = Path("/proc/bus/input/devices").read_text(encoding="utf-8")
     except OSError:
         text = ""
-    controllers = likely_controllers(parse_input_devices(text))
+    devices = parse_input_devices(text)
+    controllers = likely_controllers(devices)
     report["controllers"] = [asdict(item) for item in controllers]
+    report["controller_wake_paths"] = [asdict(item) for item in controller_wake_paths(devices)]
     report["usb_wakeup"] = _wakeup_entries(Path("/sys/bus/usb/devices"))
     report["pci_wakeup"] = _wakeup_entries(Path("/sys/bus/pci/devices"))
 
@@ -111,6 +218,29 @@ async def collect_diagnostics(paths: AppPaths | None = None) -> dict[str, Any]:
     except FileNotFoundError as exc:
         report["configuration_error"] = str(exc)
     return report
+
+
+def render_controller_wake(report: dict[str, Any]) -> str:
+    lines = ["Controller USB wake paths", "=========================", ""]
+    paths = report.get("controller_wake_paths", [])
+    if not paths:
+        lines.append("No likely controller input devices were detected.")
+        return "\n".join(lines)
+    for item in paths:
+        status = "READY" if item["root_armed"] else "NOT ARMED"
+        lines += [
+            f"{item['name']}",
+            f"  input event: {item['event']}",
+            f"  physical path: {item['phys'] or 'unknown'}",
+            f"  USB device: {item['usb_device']}",
+            f"  USB root hub: {item['usb_root']}",
+            f"  USB root wake: {item['usb_root_wakeup']} [{status}]",
+            f"  parent PCI controller: {item['pci_controller']}",
+            f"  parent PCI wake: {item['pci_wakeup']}",
+            "",
+        ]
+    lines.append("This check is read-only; it does not enable or disable wake sources.")
+    return "\n".join(lines)
 
 
 def render_diagnostics(report: dict[str, Any]) -> str:
@@ -161,12 +291,14 @@ def render_diagnostics(report: dict[str, Any]) -> str:
     else:
         lines.append("  none detected")
 
+    lines += ["", render_controller_wake(report)]
+
     enabled_usb = [item for item in report.get("usb_wakeup", []) if item["state"] == "enabled"]
     enabled_pci = [item for item in report.get("pci_wakeup", []) if item["state"] == "enabled"]
     lines += [
         "",
-        f"USB wake-enabled devices: {', '.join(item['device'] for item in enabled_usb) or 'none'}",
-        f"PCI wake-enabled devices: {', '.join(item['device'] for item in enabled_pci) or 'none'}",
+        f"All USB wake-enabled devices: {', '.join(item['device'] for item in enabled_usb) or 'none'}",
+        f"All PCI wake-enabled devices: {', '.join(item['device'] for item in enabled_pci) or 'none'}",
         "",
         "This report is read-only; it does not change USB or PCI wake settings.",
     ]

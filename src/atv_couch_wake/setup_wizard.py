@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 
 from .config import AppConfig, load_config, save_config
+from .diagnostics import collect_diagnostics, render_controller_wake
 from .discovery import DeviceCandidate, discover_all, local_ipv4_networks
 from .pairing import pair_device
 from .paths import AppPaths
@@ -96,6 +98,71 @@ async def run_setup(
     config.tv.hdmi_input = 0 if selected == 4 else ordered_inputs[selected]
     config.behavior.switch_input_after_wake = bool(config.tv.hdmi_input)
 
+    # Save pairing and the proposed input before live tests so the standalone
+    # terminal test commands are immediately usable if the wizard is interrupted.
+    save_config(config, paths)
+    controller = TVController(config, paths)
+
+    if config.tv.hdmi_input and ui.confirm(
+        "Test HDMI command",
+        f"Send TV_INPUT_HDMI_{config.tv.hdmi_input} now before enabling automation?",
+        default=True,
+    ):
+        try:
+            await controller.select_input(config.tv.hdmi_input)
+            correct = ui.confirm(
+                "Input test",
+                f"Did the TV switch to HDMI {config.tv.hdmi_input}?",
+                default=True,
+            )
+            if not correct:
+                config.behavior.switch_input_after_wake = False
+                save_config(config, paths)
+                ui.info(
+                    "Input switching disabled",
+                    "The discrete HDMI command was not confirmed. Power automation can still be used.",
+                )
+        except TVControlError as exc:
+            config.behavior.switch_input_after_wake = False
+            save_config(config, paths)
+            ui.error("HDMI command failed", str(exc))
+
+    if ui.confirm(
+        "Test TV power",
+        "Run a five-second off/on power cycle before enabling automation? "
+        "Keep the physical TV remote nearby in case wake is not supported.",
+        default=True,
+    ):
+        try:
+            status = await controller.status()
+            if status.is_on is None:
+                ui.error(
+                    "Power test skipped",
+                    "The TV did not report a known power state, so a safe toggle test cannot run.",
+                )
+            else:
+                can_test_on = True
+                if status.is_on:
+                    off = await controller.set_power(False)
+                    if not off.success:
+                        can_test_on = False
+                        ui.error("Power-off test failed", off.message)
+                    else:
+                        ui.info("Power-off command sent", "Waiting five seconds before testing power-on.")
+                        await asyncio.sleep(5.0)
+                if can_test_on:
+                    on = await controller.set_power(True)
+                    if on.success:
+                        ui.info("Power-on test passed", on.message)
+                    else:
+                        ui.error(
+                            "Power-on test failed",
+                            on.message
+                            + "\n\nRun 'atv-couch-wake -v test power-on' in a terminal for detailed logs.",
+                        )
+        except TVControlError as exc:
+            ui.error("Power test failed", str(exc))
+
     config.behavior.on_startup = ui.confirm(
         "Startup behavior",
         "Turn on the TV when this user's systemd session starts?",
@@ -124,31 +191,14 @@ async def run_setup(
 
     save_config(config, paths)
 
-    if ui.confirm(
-        "Test configuration",
-        "Wake the TV and test the selected HDMI input now?",
-        default=True,
-    ):
-        controller = TVController(config, paths)
-        try:
-            result = await controller.wake_and_select_input()
-            if not result.success:
-                ui.error("TV test failed", result.message)
-            elif config.tv.hdmi_input:
-                correct = ui.confirm(
-                    "Input test",
-                    f"Did the TV switch to HDMI {config.tv.hdmi_input}?",
-                    default=True,
-                )
-                if not correct:
-                    config.behavior.switch_input_after_wake = False
-                    save_config(config, paths)
-                    ui.info(
-                        "Input switching disabled",
-                        "Your TV may ignore discrete HDMI input keycodes. Power automation remains enabled.",
-                    )
-        except TVControlError as exc:
-            ui.error("TV test failed", str(exc))
+    try:
+        wake_report = await collect_diagnostics(paths)
+        ui.info("Controller wake check", render_controller_wake(wake_report))
+    except Exception as exc:  # Diagnostics must never prevent setup.
+        ui.error(
+            "Controller wake check unavailable",
+            f"Could not inspect the controller USB root path: {exc}",
+        )
 
     if install_service:
         if not platform.user_systemd:

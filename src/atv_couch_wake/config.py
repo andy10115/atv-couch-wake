@@ -42,10 +42,11 @@ class BehaviorConfig:
     wake_attempts: int = 4
     wake_retry_seconds: float = 2.0
     wake_settle_seconds: float = 2.5
-    command_settle_seconds: float = 2.5
+    command_ready_delay_seconds: float = 1.0
+    command_settle_seconds: float = 3.0
     state_timeout_seconds: float = 6.0
     connect_timeout_seconds: float = 8.0
-    power_attempts: int = 4
+    power_attempts: int = 6
 
 
 @dataclass
@@ -106,6 +107,7 @@ startup_delay_seconds = {b.startup_delay_seconds}
 wake_attempts = {b.wake_attempts}
 wake_retry_seconds = {b.wake_retry_seconds}
 wake_settle_seconds = {b.wake_settle_seconds}
+command_ready_delay_seconds = {b.command_ready_delay_seconds}
 command_settle_seconds = {b.command_settle_seconds}
 state_timeout_seconds = {b.state_timeout_seconds}
 connect_timeout_seconds = {b.connect_timeout_seconds}

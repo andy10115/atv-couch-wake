@@ -96,11 +96,12 @@ class RemoteTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.verified)
             self.assertEqual(fake.commands, [])
 
-    async def test_discrete_wakeup_is_used(self) -> None:
+    async def test_known_off_state_uses_safe_power_toggle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fake = FakeRemote(False)
             config = AppConfig()
             config.tv.host = fake.host
+            config.behavior.command_ready_delay_seconds = 0.0
             config.behavior.command_settle_seconds = 0.01
             controller = TVController(
                 config,
@@ -109,14 +110,14 @@ class RemoteTests(unittest.IsolatedAsyncioTestCase):
             )
             result = await controller.set_power(True)
             self.assertTrue(result.success)
-            self.assertEqual(fake.commands, ["WAKEUP"])
+            self.assertEqual(fake.commands, ["POWER"])
 
-    async def test_unknown_state_never_uses_power_toggle(self) -> None:
+    async def test_known_on_state_uses_safe_power_toggle_for_off(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            fake = FakeRemote(None, react_to_discrete=False)
+            fake = FakeRemote(True)
             config = AppConfig()
             config.tv.host = fake.host
-            config.behavior.state_timeout_seconds = 0.01
+            config.behavior.command_ready_delay_seconds = 0.0
             config.behavior.command_settle_seconds = 0.01
             controller = TVController(
                 config,
@@ -125,6 +126,24 @@ class RemoteTests(unittest.IsolatedAsyncioTestCase):
             )
             result = await controller.set_power(False)
             self.assertTrue(result.success)
+            self.assertTrue(result.verified)
+            self.assertEqual(fake.commands, ["POWER"])
+
+    async def test_unknown_state_never_uses_power_toggle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeRemote(None, react_to_discrete=False)
+            config = AppConfig()
+            config.tv.host = fake.host
+            config.behavior.state_timeout_seconds = 0.01
+            config.behavior.command_ready_delay_seconds = 0.0
+            config.behavior.command_settle_seconds = 0.01
+            controller = TVController(
+                config,
+                make_paths(Path(directory)),
+                remote_factory=lambda *_args: fake,
+            )
+            result = await controller.set_power(False)
+            self.assertFalse(result.success)
             self.assertFalse(result.verified)
             self.assertEqual(fake.commands, ["SLEEP"])
             self.assertNotIn("POWER", fake.commands)

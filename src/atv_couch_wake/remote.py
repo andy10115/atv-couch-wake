@@ -255,6 +255,26 @@ class TVController:
         finally:
             remote.disconnect()
 
+    async def _verify_power_after_disconnect(self, target_on: bool) -> bool:
+        """Reconnect briefly after a command-triggered disconnect and verify state."""
+        for _ in range(2):
+            await asyncio.sleep(1.0)
+            try:
+                remote = await self.connect()
+            except TVControlError:
+                continue
+            try:
+                state = await self._wait_for_state(
+                    remote,
+                    target=target_on,
+                    timeout=self.config.behavior.state_timeout_seconds,
+                )
+                if state == target_on:
+                    return True
+            finally:
+                remote.disconnect()
+        return False
+
     async def set_power(self, target_on: bool) -> PowerResult:
         remote = await self.connect()
         behavior = self.config.behavior
@@ -265,55 +285,94 @@ class TVController:
             if state == target_on:
                 return PowerResult(target_on, True, True, attempts, f"TV is already {target_name}.")
 
-            # These keycodes are discrete where TV firmware supports them.
-            discrete_key = "WAKEUP" if target_on else "SLEEP"
-            remote.send_key_command(discrete_key)
-            attempts += 1
-            state = await self._wait_for_state(
-                remote, target=target_on, timeout=behavior.command_settle_seconds
-            )
-            if state == target_on:
-                return PowerResult(target_on, True, True, attempts, f"TV turned {target_name}.")
+            # Android TV Remote commands can be silently dropped immediately after connect.
+            # The reference implementation waits one second before its first command.
+            await asyncio.sleep(max(0.0, behavior.command_ready_delay_seconds))
 
-            # POWER is a toggle. Only send it when the currently reported state is known
-            # and opposite to the target, then re-check before every retry.
-            for _ in range(behavior.power_attempts):
-                state = remote.is_on
-                if state == target_on:
-                    return PowerResult(target_on, True, True, attempts, f"TV turned {target_name}.")
-                if state is None:
-                    return PowerResult(
-                        target_on,
-                        True,
-                        False,
-                        attempts,
-                        f"Sent {discrete_key}, but the TV stopped reporting power state.",
+            # POWER is a toggle, but it is safe when the current state is known and
+            # opposite to the target. Re-check before every retry so we never overshoot.
+            if state is not None:
+                for _ in range(max(1, behavior.power_attempts)):
+                    current = remote.is_on
+                    if current == target_on:
+                        return PowerResult(target_on, True, True, attempts, f"TV turned {target_name}.")
+                    if current is None:
+                        break
+                    remote.send_key_command("POWER")
+                    attempts += 1
+                    state = await self._wait_for_state(
+                        remote,
+                        target=target_on,
+                        timeout=behavior.command_settle_seconds,
                     )
-                remote.send_key_command("POWER")
+                    if state == target_on:
+                        return PowerResult(target_on, True, True, attempts, f"TV turned {target_name}.")
+
+            # If state is unknown, never send a blind toggle. Try the discrete command
+            # once; some firmware supports it even though others (notably some TCL sets)
+            # ignore it.
+            if remote.is_on is None:
+                discrete_key = "WAKEUP" if target_on else "SLEEP"
+                remote.send_key_command(discrete_key)
                 attempts += 1
                 state = await self._wait_for_state(
-                    remote, target=target_on, timeout=behavior.command_settle_seconds
+                    remote,
+                    target=target_on,
+                    timeout=behavior.command_settle_seconds,
                 )
                 if state == target_on:
                     return PowerResult(target_on, True, True, attempts, f"TV turned {target_name}.")
+                return PowerResult(
+                    target_on,
+                    False,
+                    False,
+                    attempts,
+                    f"Sent {discrete_key}, but the TV did not report the requested {target_name} state. "
+                    "A blind POWER toggle was not sent because the current state is unknown.",
+                )
 
             return PowerResult(
                 target_on,
                 False,
                 False,
                 attempts,
-                f"TV did not reach the requested {target_name} state.",
+                f"TV did not reach the requested {target_name} state after {attempts} POWER send(s).",
             )
         except ConnectionClosed:
+            if attempts and await self._verify_power_after_disconnect(target_on):
+                return PowerResult(
+                    target_on,
+                    True,
+                    True,
+                    attempts,
+                    f"TV turned {target_name}; state was verified after reconnecting.",
+                )
             if not target_on and attempts:
                 return PowerResult(
                     target_on,
                     True,
                     False,
                     attempts,
-                    "TV connection closed after the sleep command; power-off is likely but unverified.",
+                    "TV connection closed after the power command; power-off is likely but unverified.",
                 )
-            raise
+            return PowerResult(
+                target_on,
+                False,
+                False,
+                attempts,
+                "The TV connection closed during power-on and the requested state could not be verified.",
+            )
+        finally:
+            remote.disconnect()
+
+    async def send_key(self, key_code: str, *, settle_seconds: float = 0.75) -> None:
+        """Send one raw Android TV key after the post-connect readiness delay."""
+        remote = await self.connect()
+        try:
+            await self._wait_for_state(remote)
+            await asyncio.sleep(max(0.0, self.config.behavior.command_ready_delay_seconds))
+            remote.send_key_command(key_code)
+            await asyncio.sleep(max(0.0, settle_seconds))
         finally:
             remote.disconnect()
 
@@ -321,13 +380,7 @@ class TVController:
         selected = self.config.tv.hdmi_input if hdmi_input is None else hdmi_input
         if selected not in {1, 2, 3, 4}:
             raise TVControlError("HDMI input must be 1, 2, 3, or 4.")
-        remote = await self.connect()
-        try:
-            await asyncio.sleep(0.4)
-            remote.send_key_command(f"TV_INPUT_HDMI_{selected}")
-            await asyncio.sleep(0.5)
-        finally:
-            remote.disconnect()
+        await self.send_key(f"TV_INPUT_HDMI_{selected}")
 
     async def wake_and_select_input(self) -> PowerResult:
         result = await self.set_power(True)

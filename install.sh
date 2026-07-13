@@ -92,6 +92,14 @@ fi
 "$VENV/bin/python" -m pip install --upgrade "$SOURCE_DIR"
 ln -sfn "$VENV/bin/atv-couch-wake" "$BIN_DIR/atv-couch-wake"
 
+# A running watcher has the old Python modules loaded in memory. Restart it after
+# an upgrade so --no-setup installations immediately use the new code.
+if command -v systemctl >/dev/null 2>&1 \
+  && systemctl --user is-active --quiet atv-couch-wake-watcher.service 2>/dev/null; then
+  systemctl --user restart atv-couch-wake-watcher.service || \
+    echo "Warning: installed the update but could not restart the user watcher." >&2
+fi
+
 cat <<DONE
 Installed atv-couch-wake.
 Launcher: $BIN_DIR/atv-couch-wake

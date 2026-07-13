@@ -18,10 +18,11 @@ startup_delay_seconds = 3.0
 wake_attempts = 4
 wake_retry_seconds = 2.0
 wake_settle_seconds = 2.5
-command_settle_seconds = 2.5
+command_ready_delay_seconds = 1.0
+command_settle_seconds = 3.0
 state_timeout_seconds = 6.0
 connect_timeout_seconds = 8.0
-power_attempts = 4
+power_attempts = 6
 
 [discovery]
 mdns = true

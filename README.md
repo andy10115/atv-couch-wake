@@ -4,9 +4,8 @@ atv-couch-wake gives a Linux gaming PC console-like television behavior without 
 It talks directly to an Android TV or Google TV over the local network using the same Remote Protocol v2
 used by the Google TV mobile remote.
 
-> **Project status:** early alpha. The core code is tested with fakes, but this initial repository has not
-> yet been validated against a real TV or across a complete suspend/shutdown cycle. Review the limitations
-> before relying on it.
+> **Project status:** early alpha. The project now includes terminal-first hardware verification, but power,
+> input, suspend, shutdown, and controller wake behavior still need validation across more TVs and PCs.
 
 ## What it does
 
@@ -18,7 +17,7 @@ used by the Google TV mobile remote.
 - Selects HDMI 1, 2, 3, or 4 after wake where the TV firmware supports discrete input commands.
 - Guides the user through discovery, pairing, input choice, testing, and service installation.
 - Rediscovers a TV when DHCP changes its address, using mDNS first and a bounded LAN scan as fallback.
-- Reports likely controllers and current USB/PCI wake settings without changing them.
+- Traces each likely controller to its actual USB root hub and parent PCI controller, then reports whether the root is wake-enabled.
 
 The project was inspired by
 [`mihirdash108/bazzite-tv-wake`](https://github.com/mihirdash108/bazzite-tv-wake), but restructures the
@@ -114,10 +113,11 @@ The wizard:
 4. Lets the user enter a TV address manually.
 5. Starts pairing and asks for the code displayed by the television.
 6. Saves the generated certificate and private key with user-only permissions.
-7. Asks which HDMI input the PC uses.
-8. Tests TV wake and input selection.
-9. Asks which lifecycle events should control the television.
-10. Installs and starts a per-user systemd watcher.
+7. Asks which HDMI input the PC uses and sends that exact discrete input command for confirmation.
+8. Offers a five-second TV off/on power-cycle test before automation is enabled.
+9. Traces detected controllers to their USB root hubs and reports whether each root is armed for wake.
+10. Asks which lifecycle events should control the television.
+11. Installs and starts a per-user systemd watcher.
 
 Configuration is stored at:
 
@@ -144,6 +144,15 @@ atv-couch-wake input [1-4]
 atv-couch-wake diagnose
 atv-couch-wake diagnose --json
 
+atv-couch-wake -v test power-on
+atv-couch-wake -v test power-off
+atv-couch-wake -v test power-cycle
+atv-couch-wake -v test input 1
+atv-couch-wake -v test input 3 --save
+atv-couch-wake test usb-wake
+atv-couch-wake test key WAKEUP
+atv-couch-wake test key POWER --force
+
 atv-couch-wake service install
 atv-couch-wake service remove
 atv-couch-wake service status
@@ -155,6 +164,38 @@ atv-couch-wake uninstall --purge --remove-runtime
 
 `--purge` deletes configuration and pairing credentials. Without it, uninstalling preserves the TV pairing
 so the utility can be reinstalled without pairing again.
+
+## Terminal-first hardware verification
+
+Before enabling the lifecycle service, verify the TV and controller behavior directly:
+
+```bash
+atv-couch-wake -v status
+atv-couch-wake -v test power-cycle
+atv-couch-wake -v test input 1
+atv-couch-wake -v test input 2
+atv-couch-wake -v test input 3 --save
+atv-couch-wake -v test input 4
+atv-couch-wake test usb-wake
+```
+
+`test power-cycle` reads the TV's reported state, turns it off when safe, waits five seconds, and then tests
+power-on. It refuses to issue a blind toggle when the state is unknown. `test input N` sends the exact
+`TV_INPUT_HDMI_N` key and asks whether it worked; `--save` stores a confirmed input.
+
+For protocol troubleshooting, raw non-toggle keys can be sent explicitly:
+
+```bash
+atv-couch-wake -v test key WAKEUP
+atv-couch-wake -v test key SLEEP
+atv-couch-wake -v test key TV_INPUT_HDMI_3
+```
+
+A raw `POWER` command is intentionally guarded because it is a toggle:
+
+```bash
+atv-couch-wake -v test key POWER --force
+```
 
 ## Lifecycle design
 
@@ -177,13 +218,14 @@ Power handling avoids blindly sending a toggle:
 
 1. Read the TV's current reported state.
 2. Return immediately when it already matches the target.
-3. Try the discrete `WAKEUP` or `SLEEP` command.
-4. Verify the state.
-5. Fall back to `POWER` only when the currently reported state is known and opposite to the target.
-6. Never send `POWER` when state is unknown.
+3. Wait one second after connecting because some TVs silently drop commands sent immediately after the remote session opens.
+4. When state is known and opposite to the target, send `POWER`, wait, and re-check before every retry.
+5. When state is unknown, never send `POWER`; try the discrete `WAKEUP` or `SLEEP` key once instead.
+6. If a command closes the connection, reconnect briefly and verify the requested state where possible.
 
-Some TV firmware ignores discrete sleep, wake, or HDMI commands. The setup test catches HDMI failures and
-can disable automatic input switching while retaining power automation.
+This matches the proven state-aware approach used by the reference project while retaining the safer discrete
+commands for unknown-state cases. Some firmware ignores discrete sleep, wake, or HDMI commands, so setup and
+the standalone terminal tests require confirmation before input switching is saved.
 
 ## Controller wake diagnostics
 
@@ -196,14 +238,15 @@ atv-couch-wake diagnose
 The report lists:
 
 - likely game controller input devices,
-- their `Phys` topology strings,
-- USB devices with `power/wakeup` enabled,
-- PCI devices with `power/wakeup` enabled,
-- TV reachability,
-- service installation and activity state.
+- the matching `/sys/class/input/eventN/device` path,
+- the controller's USB device node,
+- the exact `usbN` root hub and its `power/wakeup` state,
+- the parent PCI controller and its `power/wakeup` state,
+- a per-controller `READY` or `NOT ARMED` result,
+- TV reachability and service state.
 
-Automatic USB wake configuration should only be added after the project has collected enough real hardware
-examples to avoid disabling the wrong controller or creating persistent spurious wakeups.
+The check is still read-only. It verifies whether the root is armed but does not write persistent udev rules
+or automatically enable a root hub, because changing the wrong wake source can create immediate/spurious wakes.
 
 ## Logs
 
@@ -240,7 +283,7 @@ PYTHONPATH=src python -m unittest discover -s tests -v
   rediscovery to reduce the chance of selecting the wrong host.
 - HDMI input keycodes are part of Android's remote key enum, but individual television firmware may ignore them.
 - Multi-TV profiles are not implemented yet.
-- Controller wake configuration remains manual and hardware-specific.
+- Controller wake configuration remains manual and hardware-specific; the utility now verifies the root path and state but does not alter it.
 
 ## Security notes
 

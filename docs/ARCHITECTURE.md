@@ -27,7 +27,7 @@ Runtime rediscovery compares the TV certificate name or MAC against the identity
 ### Pairing and remote control
 
 `pairing.py` wraps the `androidtvremote2` certificate and PIN flow. `remote.py` contains state-aware power,
-status, input, reconnect, and rediscovery behavior.
+post-connect command settling, raw-key testing, status, input, reconnect, and rediscovery behavior.
 
 The remote factory is injectable so tests do not need a television.
 
@@ -52,8 +52,9 @@ command. This allows `install.sh` to use a home-directory virtual environment an
 
 ### Diagnostics
 
-`diagnostics.py` is deliberately read-only. It parses `/proc/bus/input/devices` and reads sysfs wake files,
-but never writes to them.
+`diagnostics.py` is deliberately read-only. It parses `/proc/bus/input/devices`, resolves each controller
+through `/sys/class/input/eventN/device`, identifies the controller USB device, `usbN` root hub, and parent
+PCI controller, and reads their wake files without writing to them.
 
 ## Privilege model
 
