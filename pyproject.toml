@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atv-couch-wake"
+version = "0.1.0"
+description = "Console-like Android TV / Google TV power and HDMI input automation for Linux gaming PCs"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Andy East" }]
+dependencies = [
+  "androidtvremote2>=0.3.1,<0.4",
+  "dbus-next>=0.2.3,<0.3",
+  "zeroconf>=0.132",
+  "tomli>=2.0.1; python_version < '3.11'",
+]
+keywords = ["android-tv", "google-tv", "bazzite", "linux", "systemd", "gaming"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Home Automation",
+  "Topic :: System :: Hardware",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+
+[project.scripts]
+atv-couch-wake = "atv_couch_wake.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/andy10115/atv-couch-wake"
+Repository = "https://github.com/andy10115/atv-couch-wake"
+Issues = "https://github.com/andy10115/atv-couch-wake/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
