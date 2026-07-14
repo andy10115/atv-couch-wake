@@ -1,3 +1,34 @@
+Metadata-Version: 2.4
+Name: atv-couch-wake
+Version: 0.3.0
+Summary: ADB-powered Android TV / Google TV wake, sleep, and input automation for Linux couch gaming PCs
+Author: Andy East
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/andy10115/atv-couch-wake
+Project-URL: Repository, https://github.com/andy10115/atv-couch-wake
+Project-URL: Issues, https://github.com/andy10115/atv-couch-wake/issues
+Keywords: android-tv,google-tv,bazzite,linux,systemd,gaming
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Home Automation
+Classifier: Topic :: System :: Hardware
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: dbus-next<0.3,>=0.2.3
+Requires-Dist: tomli>=2.0.1; python_version < "3.11"
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Requires-Dist: pytest-asyncio>=0.23; extra == "test"
+Requires-Dist: ruff>=0.6; extra == "test"
+Dynamic: license-file
+
 # atv-couch-wake
 
 `atv-couch-wake` gives a Linux couch-gaming PC console-like control of an Android TV or Google TV:
@@ -8,7 +39,6 @@
 - Controller USB-root wake state is checked and reported without changing hardware settings.
 
 Version 0.3 uses **ADB exclusively** for TV control. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
-Please understand that this means this has not been tested nor will it work with non Android/GoogleTV's.  Other TV manufacturs may have similar functionality, and if you'd like to build on this project to support other TV's such as LG, Samsung, or Roku TV's you may submit a PR or build a standalone tool.
 
 > **Alpha software:** test wake, sleep, input switching, suspend, and shutdown on your own hardware before relying on it.
 
@@ -39,7 +69,7 @@ sudo apt install adb
 sudo zypper install android-tools
 ```
 
-On Bazzite, use Bazzite's supported `ujust` recipe or portal option for Android platform tools before running the installer.
+On Bazzite, use Bazzite's supported `ujust` recipe for Android platform tools before running the installer.
 
 Verify:
 

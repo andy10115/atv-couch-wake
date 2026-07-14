@@ -1,0 +1,2 @@
+[console_scripts]
+atv-couch-wake = atv_couch_wake.cli:main

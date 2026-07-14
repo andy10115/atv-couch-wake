@@ -1,14 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Replaced `androidtvremote2` with an ADB-first control backend.
+- Added guided developer-mode, debugging, and standby-power onboarding.
+- Added strict `adb` checks without automatic package installation.
+- Added optional Wireless debugging pairing-code support.
+- Added direct TV Input Framework discovery via `dumpsys tv_input`.
+- Added live passthrough-input testing and storage of the exact input URI.
+- Added ADB power-on/off and power-cycle tests.
+- Kept all lifecycle automation in a per-user systemd watcher.
+- Preserved read-only controller USB-root wake diagnostics.
+- Removed remote-protocol certificates, pairing, mDNS, and subnet scanning.
+
 ## 0.2.0
 
-- Wait one second after connecting before sending TV commands.
-- Use state-aware `POWER` retries when the current state is known.
-- Keep `WAKEUP` and `SLEEP` as non-toggle fallbacks when state is unknown.
-- Add terminal-first power, HDMI input, raw-key, and USB wake tests.
-- Test HDMI switching and an optional off/on cycle before setup enables automation.
-- Trace each detected controller to its exact USB root hub and parent PCI wake state.
-
-## 0.1.0
-
-- Initial alpha implementation.
+- Added terminal-first power, input, and USB-root verification.

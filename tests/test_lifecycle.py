@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
+from atv_couch_wake.adb_control import PowerResult, TVControlError
 from atv_couch_wake.config import AppConfig
 from atv_couch_wake.lifecycle import _metadata_shutdown_type, _wake_with_retries
-from atv_couch_wake.remote import PowerResult, TVControlError
 
 
 class Variant:

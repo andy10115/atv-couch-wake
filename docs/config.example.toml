@@ -1,11 +1,14 @@
+# ~/.config/atv-couch-wake/config.toml
+
 [tv]
 host = "10.0.0.42"
-name = "Living Room TV"
-mac = "AA:BB:CC:DD:EE:FF"
-api_port = 6466
-pair_port = 6467
-hdmi_input = 3
-client_name = "atv-couch-wake"
+port = 5555
+name = "Living Room TCL"
+model = "TCL Google TV"
+adb_path = "/usr/bin/adb"
+input_id = "com.tcl.tvinput/.TvPassThroughService/HW15"
+input_uri = "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW15"
+input_label = "Gaming PC"
 
 [behavior]
 on_startup = true
@@ -15,21 +18,12 @@ off_on_shutdown = true
 off_on_reboot = false
 switch_input_after_wake = true
 startup_delay_seconds = 3.0
-wake_attempts = 4
+wake_attempts = 5
 wake_retry_seconds = 2.0
-wake_settle_seconds = 2.5
-command_ready_delay_seconds = 1.0
-command_settle_seconds = 3.0
-state_timeout_seconds = 6.0
-connect_timeout_seconds = 8.0
-power_attempts = 6
-
-[discovery]
-mdns = true
-subnet_scan = true
-mdns_timeout_seconds = 3.0
-probe_timeout_seconds = 0.25
-subnet = "10.0.0.0/24"
+wake_settle_seconds = 2.0
+input_settle_seconds = 1.0
+command_timeout_seconds = 3.0
+connect_timeout_seconds = 2.5
 
 [service]
 inhibitor_delay_max_seconds = 4.5

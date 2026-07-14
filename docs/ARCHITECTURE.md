@@ -1,81 +1,47 @@
 # Architecture
 
-## Components
+## ADB backend
 
-### CLI
+`adb_control.py` is the single TV-control backend. It resolves the distribution-provided `adb` executable, connects to the configured serial, verifies authorization, and executes commands as the desktop user.
 
-`atv_couch_wake.cli` exposes the `atv-couch-wake` command. It keeps automation events and interactive
-commands in the same executable so systemd does not need generated shell scripts containing usernames or
-hard-coded home-directory paths.
+Power uses discrete Android keyevents:
 
-### Configuration and paths
+- `KEYCODE_WAKEUP`
+- `KEYCODE_SLEEP`
 
-`paths.py` resolves XDG locations. `config.py` maps TOML into dataclasses and writes updates atomically.
-Certificates live in the XDG data directory rather than the configuration directory because they are
-persistent application data.
+Input switching uses Android's TV Input Framework rather than remote-protocol HDMI keycodes. The backend parses physical passthrough IDs from `dumpsys tv_input`, percent-encodes the selected vendor-specific input ID, and launches its passthrough URI with `am start`.
 
-### Discovery
+No manufacturer input numbers are hard-coded. A TCL may expose `HW15` through `com.tcl.tvinput/.TvPassThroughService`; another vendor may expose a different component and hardware numbering scheme.
 
-`discovery.py` uses three discovery paths:
+## Onboarding
 
-1. Android TV Remote v2 mDNS service discovery.
-2. Direct use of the configured host.
-3. A bounded scan of directly attached IPv4 networks for TCP 6466.
+`setup_wizard.py` treats live hardware verification as part of configuration:
 
-Runtime rediscovery compares the TV certificate name or MAC against the identity stored during pairing.
+1. Require an existing `adb` installation.
+2. Explain developer-mode and standby-network settings.
+3. Support classic TCP debugging and optional Wireless debugging pairing.
+4. Wait for ADB authorization.
+5. Test sleep and wake.
+6. Discover and test physical passthrough inputs.
+7. Save the full working input ID and URI.
+8. Configure lifecycle policy.
+9. inspect controller USB-root wake state.
+10. Offer the user service only after testing.
 
-### Pairing and remote control
+Terminal, KDialog, and Zenity share the same setup logic through `ui.py`.
 
-`pairing.py` wraps the `androidtvremote2` certificate and PIN flow. `remote.py` contains state-aware power,
-post-connect command settling, raw-key testing, status, input, reconnect, and rediscovery behavior.
+## Lifecycle watcher
 
-The remote factory is injectable so tests do not need a television.
+`lifecycle.py` runs inside `atv-couch-wake-watcher.service`, a per-user systemd unit. It connects to the system logind bus and holds a delay inhibitor for `sleep:shutdown`.
 
-### UI
+When logind announces an impending suspend or shutdown, the watcher sends the ADB sleep command before releasing the inhibitor. After resume it reacquires the inhibitor, retries ADB wake while networking returns, and launches the saved input URI.
 
-`ui.py` provides one wizard API with terminal, KDialog, and Zenity implementations. Business logic does not
-contain desktop-specific subprocess calls.
+The watcher is deliberately not a system service:
 
-### Lifecycle watcher
+- It reuses the user's ADB authorization keys under `~/.android`.
+- It avoids root-owned scripts and distribution-specific filesystem paths.
+- It works on mutable and immutable systemd distributions.
 
-`lifecycle.py` connects to `org.freedesktop.login1` on the system bus and requests a delay inhibitor for
-`sleep:shutdown`. The watcher handles startup immediately, then responds to sleep/resume and
-shutdown/reboot signals.
+## USB wake diagnostics
 
-The inhibitor file descriptor is closed only after the relevant TV command completes or reaches the local
-deadline. It is reacquired after resume.
-
-### systemd integration
-
-`systemd_integration.py` creates a per-user service using the exact Python interpreter running the setup
-command. This allows `install.sh` to use a home-directory virtual environment and works on atomic systems.
-
-### Diagnostics
-
-`diagnostics.py` is deliberately read-only. It parses `/proc/bus/input/devices`, resolves each controller
-through `/sys/class/input/eventN/device`, identifies the controller USB device, `usbN` root hub, and parent
-PCI controller, and reads their wake files without writing to them.
-
-## Privilege model
-
-No component requires root for normal installation or operation. The logged-in user can access the system
-D-Bus login1 interface and request delay inhibitors. USB wake configuration is outside the first release.
-
-## Event policy
-
-| Event | Default |
-| --- | --- |
-| User service startup | TV on, select configured HDMI input |
-| Resume | TV on, select configured HDMI input |
-| Suspend | TV off |
-| Poweroff | TV off |
-| Reboot | Leave TV on |
-
-## Future work
-
-- Hardware-tested USB wake rule generation.
-- Multiple TV profiles.
-- Gaming-session-only startup activation.
-- Vendor-specific input selection fallbacks.
-- A proper packaged release through PyPI or distro/community repositories.
-- Structured journald fields and automated support bundles.
+`diagnostics.py` parses `/proc/bus/input/devices`, follows each likely controller through sysfs, and reports the corresponding USB root hub and PCI wake state. It does not make privileged changes.

@@ -45,6 +45,23 @@ HELP
 done
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+
+if ! command -v adb >/dev/null 2>&1; then
+  cat >&2 <<'ADBHELP'
+ADB (Android platform tools) is required but was not found.
+
+Install it with your distribution's supported package method, then rerun this installer:
+
+  Arch Linux / CachyOS:  sudo pacman -S android-tools
+  Fedora:                sudo dnf install android-tools
+  Debian / Ubuntu:       sudo apt install adb
+  openSUSE:              sudo zypper install android-tools
+  Bazzite:               use Bazzite's supported ujust/portal recipe for Android platform tools
+
+atv-couch-wake does not install or layer system packages automatically.
+ADBHELP
+  exit 1
+fi
 python3 - <<'PY'
 import sys
 if sys.version_info < (3, 10):
