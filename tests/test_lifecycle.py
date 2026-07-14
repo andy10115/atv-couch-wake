@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from atv_couch_wake.adb_control import PowerResult, TVControlError
 from atv_couch_wake.config import AppConfig
-from atv_couch_wake.lifecycle import _metadata_shutdown_type, _wake_with_retries
+from atv_couch_wake.lifecycle import _metadata_shutdown_type, _wake_with_retries, handle_event
 
 
 class Variant:
@@ -41,6 +42,20 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         result = await _wake_with_retries("resume", controller, config)
         self.assertTrue(result.success)
         self.assertEqual(controller.calls, 2)
+
+    async def test_suspend_settle_delay_runs_even_when_tv_poweroff_is_disabled(self) -> None:
+        config = AppConfig()
+        config.behavior.off_on_suspend = False
+        config.controller_wake.enabled = True
+        config.controller_wake.settle_delay_seconds = 2.0
+        with (
+            patch("atv_couch_wake.lifecycle.ADBController", return_value=object()),
+            patch("atv_couch_wake.lifecycle.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            result = await handle_event("suspend", config, settle_delay_override=0.25)
+        sleep.assert_awaited_once_with(0.25)
+        self.assertTrue(result.success)
+        self.assertFalse(result.performed)
 
 
 if __name__ == "__main__":

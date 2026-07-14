@@ -16,11 +16,12 @@ from .adb_control import (
     TVControlError,
     installation_help,
 )
-from .config import load_config, save_config
+from .config import ControllerWakeConfig, load_config, save_config
+from .controller_wake import remove_wake_configuration, wol_fallback_summary
 from .diagnostics import collect_diagnostics, diagnostics_json, render_controller_wake, render_diagnostics
 from .lifecycle import LogindWatcher, handle_event
 from .paths import AppPaths
-from .setup_wizard import run_setup
+from .setup_wizard import run_controller_wake_setup, run_setup, test_controller_wake
 from .systemd_integration import install_user_service, remove_user_service, service_status
 from .ui import UserCancelled, select_ui
 
@@ -63,6 +64,16 @@ def _parser() -> argparse.ArgumentParser:
     test_sub.add_parser("usb-wake", help="show each controller's USB root wake state")
     test_key = test_sub.add_parser("key", help="send one raw Android keyevent through ADB")
     test_key.add_argument("key_code", help="for example KEYCODE_HOME or KEYCODE_WAKEUP")
+
+    controller = sub.add_parser("controller", help="configure and test controller wake")
+    controller_sub = controller.add_subparsers(dest="controller_action", required=True)
+    controller_setup = controller_sub.add_parser("setup", help="configure persistent controller wake")
+    controller_setup.add_argument("--ui", choices=["auto", "terminal", "kdialog", "zenity"], default="auto")
+    controller_test = controller_sub.add_parser("test", help="run a real suspend/controller wake test")
+    controller_test.add_argument("--ui", choices=["auto", "terminal", "kdialog", "zenity"], default="auto")
+    controller_sub.add_parser("status", help="show saved controller wake configuration and topology")
+    controller_sub.add_parser("disable", help="remove the persistent controller wake udev rule")
+    controller_sub.add_parser("wol", help="show the Wake-on-LAN fallback guide")
 
     service = sub.add_parser("service", help="manage the per-user lifecycle watcher")
     service.add_argument("action", choices=["install", "remove", "status", "logs"])
@@ -226,6 +237,46 @@ async def _run_async(args: argparse.Namespace, paths: AppPaths) -> int:
         report = await collect_diagnostics(paths)
         print(diagnostics_json(report) if args.json else render_diagnostics(report))
         return 0
+    if args.command == "controller":
+        if args.controller_action == "wol":
+            print(wol_fallback_summary())
+            return 0
+        config = load_config(paths)
+        if args.controller_action == "setup":
+            run_controller_wake_setup(select_ui(args.ui), config, paths)
+            return 0
+        if args.controller_action == "test":
+            ui = select_ui(args.ui)
+            verified = test_controller_wake(ui, config)
+            config.controller_wake.verified = verified
+            save_config(config, paths)
+            if verified:
+                print("Controller wake verified.")
+                return 0
+            print(wol_fallback_summary())
+            return 1
+        if args.controller_action == "status":
+            report = await collect_diagnostics(paths)
+            print(render_controller_wake(report))
+            saved = config.controller_wake
+            print("\nSaved controller wake configuration")
+            print("===================================")
+            print(f"enabled: {saved.enabled}")
+            print(f"controller: {saved.controller_name or 'none'}")
+            print(f"mode: {saved.mode}")
+            print(f"USB root: {saved.usb_root or 'none'}")
+            print(f"PCI controller: {saved.pci_controller or 'none'}")
+            print(f"settle delay: {saved.settle_delay_seconds:g} seconds")
+            print(f"verified: {saved.verified}")
+            print(f"udev rule: {saved.rule_path}")
+            return 0 if saved.enabled else 1
+        if args.controller_action == "disable":
+            remove_wake_configuration()
+            config.controller_wake = ControllerWakeConfig()
+            save_config(config, paths)
+            print("Removed the persistent controller wake rule. Current sysfs state may remain until reboot.")
+            return 0
+        raise ValueError(args.controller_action)
     if args.command == "test":
         return await _test_command(args, paths)
     if args.command == "event":

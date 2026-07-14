@@ -1,9 +1,0 @@
-dbus-next<0.3,>=0.2.3
-
-[:python_version < "3.11"]
-tomli>=2.0.1
-
-[test]
-pytest>=8
-pytest-asyncio>=0.23
-ruff>=0.6

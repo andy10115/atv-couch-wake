@@ -55,6 +55,8 @@ async def handle_event(
     event: str,
     config: AppConfig | None = None,
     paths: AppPaths | None = None,
+    *,
+    settle_delay_override: float | None = None,
 ) -> EventResult:
     paths = paths or AppPaths.from_environment()
     config = config or load_config(paths)
@@ -72,8 +74,19 @@ async def handle_event(
                 return EventResult(event, False, True, "Resume automation is disabled.")
             return await _wake_with_retries(event, controller, config)
         if event == "suspend":
+            settle_delay = (
+                config.controller_wake.settle_delay_seconds
+                if settle_delay_override is None
+                else settle_delay_override
+            )
+            if config.controller_wake.enabled and settle_delay > 0:
+                LOGGER.info(
+                    "Waiting %.2f seconds for controller/dongle re-enumeration to settle",
+                    settle_delay,
+                )
+                await asyncio.sleep(settle_delay)
             if not behavior.off_on_suspend:
-                return EventResult(event, False, True, "Suspend automation is disabled.")
+                return EventResult(event, False, True, "Suspend TV power-off is disabled.")
             result = await controller.set_power(False)
             return _power_event_result(event, result)
         if event == "shutdown":
@@ -233,8 +246,29 @@ class LogindWatcher:
 
     async def _run_event_with_deadline(self, event: str) -> None:
         timeout = self.effective_delay_seconds
+        settle_override: float | None = None
+        if event == "suspend" and self.config.controller_wake.enabled:
+            requested = max(0.0, self.config.controller_wake.settle_delay_seconds)
+            # A user-service delay inhibitor is bounded by logind. Reserve a small
+            # portion of that window for the already-proven TV sleep command.
+            available = max(0.0, timeout - 1.0)
+            settle_override = min(requested, available)
+            if settle_override < requested:
+                LOGGER.warning(
+                    "Controller settle delay capped from %.2f to %.2f seconds by logind's inhibitor window",
+                    requested,
+                    settle_override,
+                )
         try:
-            result = await asyncio.wait_for(handle_event(event, self.config, self.paths), timeout=timeout)
+            result = await asyncio.wait_for(
+                handle_event(
+                    event,
+                    self.config,
+                    self.paths,
+                    settle_delay_override=settle_override,
+                ),
+                timeout=timeout,
+            )
             log = LOGGER.info if result.success else LOGGER.error
             log("Lifecycle event %s: %s", event, result.message)
         except asyncio.TimeoutError:

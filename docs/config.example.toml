@@ -25,6 +25,16 @@ input_settle_seconds = 1.0
 command_timeout_seconds = 3.0
 connect_timeout_seconds = 2.5
 
+[controller_wake]
+enabled = true
+controller_name = "8BitDo USB Adapter 2"
+usb_root = "usb3"
+pci_controller = "0000:12:00.4"
+mode = "selective"
+verified = true
+settle_delay_seconds = 2.0
+rule_path = "/etc/udev/rules.d/90-atv-couch-wake-controller.rules"
+
 [service]
 inhibitor_delay_max_seconds = 4.5
 ui_backend = "auto"

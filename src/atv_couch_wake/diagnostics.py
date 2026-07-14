@@ -209,6 +209,7 @@ async def collect_diagnostics(paths: AppPaths | None = None) -> dict[str, Any]:
             "input_label": config.tv.input_label,
             "input_uri": config.tv.input_uri,
         }
+        report["configured_controller_wake"] = asdict(config.controller_wake)
         try:
             status = await ADBController(config).status()
             report["tv_status"] = {
@@ -289,6 +290,20 @@ def render_diagnostics(report: dict[str, Any]) -> str:
         lines += ["", "TV connection:"]
         for key, value in report["tv_status"].items():
             lines.append(f"  {key}: {value}")
+
+    if "configured_controller_wake" in report:
+        wake = report["configured_controller_wake"]
+        lines += [
+            "",
+            "Saved controller wake configuration:",
+            f"  enabled: {wake['enabled']}",
+            f"  controller: {wake['controller_name'] or 'none'}",
+            f"  mode: {wake['mode']}",
+            f"  USB root: {wake['usb_root'] or 'none'}",
+            f"  PCI controller: {wake['pci_controller'] or 'none'}",
+            f"  settle delay: {wake['settle_delay_seconds']} seconds",
+            f"  verified: {wake['verified']}",
+        ]
 
     lines += ["", render_controller_wake(report)]
     enabled_usb = [item for item in report.get("usb_wakeup", []) if item["state"] == "enabled"]

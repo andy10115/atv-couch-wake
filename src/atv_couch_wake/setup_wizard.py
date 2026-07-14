@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import subprocess
 
 from .adb_control import (
     ADBController,
@@ -15,6 +16,14 @@ from .adb_control import (
     installation_help,
 )
 from .config import AppConfig, load_config, save_config
+from .controller_wake import (
+    ControllerWakeError,
+    configurable_paths,
+    install_wake_configuration,
+    save_all_roots,
+    save_selected_path,
+    wol_fallback_summary,
+)
 from .diagnostics import collect_diagnostics, render_controller_wake
 from .paths import AppPaths
 from .platform_info import inspect_platform
@@ -121,14 +130,18 @@ async def _test_power(ui: UI, controller: ADBController) -> None:
     ):
         return
 
-    ui.info("Power-off test", "Sending KEYCODE_SLEEP. The panel should turn off. (turn back on if successful)")
+    ui.info(
+        "Power-off test", "Sending KEYCODE_SLEEP. The panel should turn off. (turn back on if successful)"
+    )
     off = await controller.set_power(False)
     if not off.success:
         raise TVControlError(off.message)
     if not ui.confirm("Power-off result", "Did the TV turn off?", default=True):
         raise TVControlError("The TV did not confirm the ADB sleep test.")
 
-    ui.info("Power-on test", "Waiting five seconds, then sending KEYCODE_WAKEUP. (test begins on next prompt)")
+    ui.info(
+        "Power-on test", "Waiting five seconds, then sending KEYCODE_WAKEUP. (test begins on next prompt)"
+    )
     await asyncio.sleep(5.0)
     on = await controller.set_power(True)
     if not on.success:
@@ -154,7 +167,8 @@ async def _choose_input(ui: UI, controller: ADBController, config: AppConfig) ->
     ui.info(
         "Input test",
         "Use the physical remote to open the Google TV Home screen or switch away from the gaming PC.\n\n"
-        "The wizard will now launch each passthrough input directly. Answer Yes when the PC's input appears. (Test begins on next prompt)",
+        "The wizard will now launch each passthrough input directly. Answer Yes when the PC's "
+        "input appears. (Test begins on next prompt)",
     )
 
     selected: TVInput | None = None
@@ -196,6 +210,154 @@ async def _choose_input(ui: UI, controller: ADBController, config: AppConfig) ->
     config.tv.input_label = label
     config.behavior.switch_input_after_wake = True
     ui.info("Input saved", f"Saved {label}:\n{selected.input_id}")
+
+
+def _controller_choice_label(path: object) -> str:
+    return f"{path.name} — {path.usb_root} via {path.pci_controller} (root wake: {path.usb_root_wakeup})"
+
+
+def _controller_settle_delay(ui: UI, config: AppConfig) -> float:
+    if not ui.confirm(
+        "Controller re-enumeration guard",
+        "Some wireless dongles change USB identity when the controller connects or disconnects. "
+        "That re-enumeration can itself cause an immediate unwanted wake if suspend begins at the "
+        "same moment.\n\nEnable a short pre-suspend settling delay?",
+        default=True,
+    ):
+        return 0.0
+    default = str(config.controller_wake.settle_delay_seconds or 2.0)
+    raw = ui.prompt(
+        "Settle delay",
+        "Seconds to wait before the PC enters suspend. The user-service watcher is limited by "
+        "logind's delay-inhibitor window, so long values may be capped automatically",
+        default=default,
+    )
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise TVControlError("The controller settle delay must be a number of seconds.") from exc
+    return max(0.0, value)
+
+
+def test_controller_wake(ui: UI, config: AppConfig) -> bool:
+    ui.info(
+        "Controller wake test",
+        "The PC can now perform a real suspend test.\n\n"
+        "1. Make sure you can still reach the PC's physical power button or a keyboard in case the "
+        "controller cannot wake it.\n"
+        "2. Turn the selected controller off before continuing.\n"
+        "3. The PC will suspend.\n"
+        "4. After it is fully asleep, turn the controller back on.\n\n"
+        "If the controller cannot wake this hardware, use another available wake method to return "
+        "to this setup session.",
+    )
+    if not ui.confirm("Run suspend test", "Suspend the PC now and test controller wake?", default=True):
+        return False
+    result = subprocess.run(["systemctl", "suspend"], check=False)
+    if result.returncode != 0:
+        raise ControllerWakeError("systemctl suspend failed; controller wake could not be tested.")
+    return ui.confirm(
+        "Wake test result",
+        "Did turning on the selected controller wake the PC?",
+        default=True,
+    )
+
+
+def run_controller_wake_setup(ui: UI, config: AppConfig, paths: AppPaths) -> None:
+    if not ui.confirm(
+        "Controller wake",
+        "Would you like to try allowing a USB controller or wireless controller dongle to wake "
+        "this PC from suspend?\n\nThis is optional and hardware-dependent.",
+        default=True,
+    ):
+        return
+
+    ui.info(
+        "How controller wake works",
+        "atv-couch-wake traces the selected controller to its USB root hub and, when available, "
+        "its parent PCI USB controller. It enables wake on that stable hardware path rather than "
+        "the temporary controller device itself.\n\nThis matters for wireless dongles that re-enumerate or "
+        "change device identity when the controller turns on or off.\n\nEnabling a USB root hub may also "
+        "allow other wake-capable devices attached to that same hub to wake the PC.",
+    )
+
+    paths_found = configurable_paths()
+    selected = None
+    all_roots = False
+    if paths_found:
+        choices = [_controller_choice_label(item) for item in paths_found]
+        choices += ["Enable every USB root hub (broader fallback)", "Skip controller wake"]
+        choice = ui.choose(
+            "Select controller",
+            "Choose the controller or dongle that should wake this PC. Select the all-root fallback "
+            "only when selective detection does not work.",
+            choices,
+        )
+        if choice == len(paths_found) + 1:
+            return
+        if choice == len(paths_found):
+            all_roots = True
+        else:
+            selected = paths_found[choice]
+    else:
+        ui.error(
+            "No selectable USB controller path found",
+            "No likely controller could be traced to a USB root hub. This can happen with direct "
+            "Bluetooth controllers or unusual input stacks.",
+        )
+        if not ui.confirm(
+            "Broad USB wake fallback",
+            "Try enabling every USB root hub instead? This may allow keyboards, mice, and other "
+            "USB devices to wake the PC too.",
+            default=False,
+        ):
+            ui.info("Wake-on-LAN fallback", wol_fallback_summary())
+            return
+        all_roots = True
+
+    settle_delay = _controller_settle_delay(ui, config)
+    ui.info(
+        "Administrator authorization",
+        "Linux restricts changes to hardware wake permissions. The next step uses sudo once to "
+        "install a udev rule and apply the wake setting immediately.\n\nNo root daemon or system-level "
+        "systemd service is installed; TV automation remains a per-user service.",
+    )
+
+    try:
+        result = install_wake_configuration(selected, all_roots=all_roots)
+    except ControllerWakeError:
+        ui.info("Wake-on-LAN fallback", wol_fallback_summary())
+        raise
+
+    if all_roots:
+        save_all_roots(config, settle_delay_seconds=settle_delay)
+    else:
+        assert selected is not None
+        save_selected_path(config, selected, settle_delay_seconds=settle_delay)
+    save_config(config, paths)
+
+    ui.info(
+        "Controller wake configured",
+        f"Mode: {result.mode}\n"
+        f"USB root hub(s): {', '.join(result.usb_roots) or 'none'}\n"
+        f"PCI controller(s): {', '.join(result.pci_controllers) or 'not required'}\n"
+        f"Persistent rule: {result.rule_path}\n\n"
+        "The root-hub rule remains valid when a wireless dongle re-enumerates because it does not "
+        "depend on the dongle's temporary event or USB device name.",
+    )
+
+    verified = test_controller_wake(ui, config)
+    config.controller_wake.verified = verified
+    save_config(config, paths)
+    if verified:
+        ui.info("Controller wake verified", "The selected controller successfully woke this PC from suspend.")
+    else:
+        ui.info(
+            "Controller wake not verified",
+            "The wake path is configured, but the controller test did not succeed or was skipped. "
+            "Sometimes controller wake simply is not possible with a particular dongle, USB "
+            "controller, firmware, or BIOS/UEFI combination.\n\n" + wol_fallback_summary(),
+        )
 
 
 async def run_setup(
@@ -293,6 +455,15 @@ async def run_setup(
     except Exception as exc:  # Diagnostics must not block TV setup.
         ui.error("Controller wake check unavailable", str(exc))
 
+    try:
+        run_controller_wake_setup(ui, config, paths)
+    except ControllerWakeError as exc:
+        ui.error(
+            "Controller wake setup failed",
+            f"{exc}\n\nTV automation can still be installed normally. You can rerun "
+            "'atv-couch-wake controller setup' later.",
+        )
+
     if install_service and not platform.user_systemd:
         ui.error(
             "User service unavailable",
@@ -304,7 +475,7 @@ async def run_setup(
     if install_service and ui.confirm(
         "Install automation",
         "Install and start the per-user systemd lifecycle watcher now?\n\n"
-        "No system-wide service or root-owned hook will be created.",
+        "No system-wide systemd service or root daemon will be created.",
         default=True,
     ):
         unit = install_user_service(paths)

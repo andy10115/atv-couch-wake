@@ -5,9 +5,9 @@
 - TV sleeps before the PC suspends or shuts down.
 - TV wakes after the PC resumes or the user session starts.
 - The TV switches directly to the saved physical input through Android's TV Input Framework.
-- Controller USB-root wake state is checked and reported without changing hardware settings.
+- When hardware permits it, a USB controller or wireless controller dongle can wake the PC from suspend.
 
-Version 0.3 uses **ADB exclusively** for TV control. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
+Version 0.4 uses **ADB exclusively** for TV control and adds optional controller-to-PC wake configuration. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
 
 Please understand that this means this has not been tested nor will it work with non Android/GoogleTV's.  Other TV manufacturs may have similar functionality, and if you'd like to build on this project to support other TV's such as LG, Samsung, or Roku TV's you may submit a PR or build a standalone tool.
 
@@ -18,10 +18,10 @@ Please understand that this means this has not been tested nor will it work with
 - Linux with systemd and an active per-user systemd manager.
 - Python 3.10 or newer.
 - Android TV or Google TV reachable over the local network.
-- Android TV with a static local IP address. (this is done in your router)
 - Android platform tools (`adb`) installed by your distribution.
 - Developer options and network/wireless debugging enabled on the TV.
 - A trusted local network. ADB is powerful; do not expose its port to the internet.
+- **Recommended** - Android TV with a static local IP address. (this is done on your router)
 
 ### Install ADB first
 
@@ -108,7 +108,7 @@ The installer:
 2. Creates an isolated virtual environment under `~/.local/share/atv-couch-wake/venv`.
 3. Installs the CLI at `~/.local/bin/atv-couch-wake`.
 4. Starts the guided setup unless `--no-setup` is supplied.
-5. Never installs a system package or system-wide service.
+5. Never installs a system package or system-wide systemd service. Optional controller wake uses a one-time privileged udev rule, not a root daemon.
 
 ## Guided onboarding
 
@@ -130,8 +130,11 @@ The wizard:
 8. Launches each input directly and asks which one displays the gaming PC.
 9. Stores the exact vendor-specific input ID and passthrough URI.
 10. Asks which startup, suspend, resume, shutdown, and reboot behaviors to enable.
-11. Reports whether each detected controller's actual USB root hub is armed for wake.
-12. Offers to install a **per-user** systemd watcher.
+11. Detects likely USB controllers and wireless controller dongles and traces them to their USB root hub and parent PCI controller.
+12. Optionally uses one-time `sudo` authorization to install a persistent udev rule that enables wake on the selected stable hardware path.
+13. Offers a real suspend/resume test and records whether controller wake was actually verified.
+14. Explains the Wake-on-LAN phone fallback when controller wake is unavailable or fails.
+15. Offers to install a **per-user** systemd watcher.
 
 The TV will display an authorization prompt during the first connection. Select **Always allow from this computer** before accepting it.
 
@@ -263,19 +266,82 @@ The watcher connects to the system logind D-Bus API, holds a delay inhibitor, an
 
 The user must have an active systemd user session. Couch-oriented distributions that automatically log into Gaming Mode satisfy this naturally.
 
-## Controller wake diagnostics
+## Controller wake
+
+Controller wake is optional and hardware-dependent. Some controller dongles can wake a PC reliably; some cannot, regardless of software configuration. The controller or dongle must emit a real wake event, the USB root hub and parent controller must support wake, and BIOS/UEFI must allow that hardware to resume the machine.
+
+Run guided controller setup:
 
 ```bash
+atv-couch-wake controller setup
+```
+
+The setup flow:
+
+1. Detects likely controllers from Linux input devices.
+2. Traces the selected device to its USB root hub and parent PCI USB controller.
+3. Enables wake on the stable root-hub path rather than the temporary leaf device. This allows wireless dongles to re-enumerate or change identity without losing the wake configuration.
+4. Installs `/etc/udev/rules.d/90-atv-couch-wake-controller.rules` using one-time `sudo` authorization.
+5. Applies the setting immediately for the current boot.
+6. Optionally adds a short pre-suspend settling delay for dongles that re-enumerate when the controller connects or disconnects.
+7. Offers a real suspend test and records whether controller wake was actually verified.
+
+The TV lifecycle watcher remains a **per-user** systemd service. Controller wake does not install a root daemon or a system-level systemd service; only the persistent udev hardware rule is privileged.
+
+Check status and topology:
+
+```bash
+atv-couch-wake controller status
 atv-couch-wake test usb-wake
 ```
 
-For each likely controller, the report traces:
+Retest after changing ports, firmware, BIOS settings, or controllers:
 
-```text
-input event → USB device → USB root hub → PCI controller
+```bash
+atv-couch-wake controller test
 ```
 
-It explicitly reports the root hub as `READY` or `NOT ARMED`. The check is read-only; this release does not write udev rules or enable every root hub automatically.
+Remove the persistent controller wake rule:
+
+```bash
+atv-couch-wake controller disable
+```
+
+### Re-enumerating wireless dongles
+
+Some adapters change USB identity when a controller powers on or off. `atv-couch-wake` does not persist wake against the temporary `eventN` or leaf USB device. It arms the stable USB root hub, so the rule remains applicable when the dongle re-enumerates.
+
+A re-enumeration event can also cause an immediate unwanted wake if it happens at the same moment the PC is entering suspend. The optional settle delay gives the dongle a brief chance to finish that transition first. Because the lifecycle watcher is intentionally a user service, the delay is bounded by logind's delay-inhibitor window and may be capped automatically.
+
+Enabling a USB root hub can also allow other wake-capable devices attached to the same root hub to wake the PC. The wizard prefers a detected controller path and offers an all-root fallback only when selective detection is unavailable.
+
+### When controller wake simply will not work
+
+This is an unavoidable hardware limitation on some systems. A controller may work perfectly once Linux is running but still be unable to generate the USB wake event required to resume the PC. BIOS/UEFI options, USB-controller behavior, dongle revisions, and suspend mode can all matter.
+
+In that case, **Wake-on-LAN from a phone is the best fallback**. You still get the same TV behavior: the phone wakes the PC, then `atv-couch-wake` sees the resume/startup event, wakes the TV, and switches to the gaming input. The only difference is that the first wake comes from the phone instead of the controller.
+
+Quick setup summary:
+
+1. Prefer wired Ethernet and enable **Wake-on-LAN**, **PCIe wake**, or the equivalent option in BIOS/UEFI.
+2. Check the Ethernet interface with `ethtool <interface>` and look for `Supports Wake-on: g` and `Wake-on: g`.
+3. NetworkManager users can persist magic-packet wake with:
+
+   ```bash
+   nmcli connection modify "<connection name>" 802-3-ethernet.wake-on-lan magic
+   ```
+
+   Reconnect the connection or reboot afterward.
+4. Install a reputable Wake-on-LAN app on the phone and add the PC's Ethernet MAC address. The simplest setup keeps the phone on the same LAN.
+5. Send the magic packet from the phone. The PC wakes; `atv-couch-wake` then wakes the TV and selects the saved input.
+
+Print this guide at any time:
+
+```bash
+atv-couch-wake controller wol
+```
+
+Do not expose ADB or Wake-on-LAN directly to the public internet. Use a VPN into the home network for remote access.
 
 ## Configuration
 
@@ -301,6 +367,7 @@ The report includes:
 - ADB availability and configured path.
 - TV reachability, authorization, power state, model, and current input.
 - User-service installation and runtime status.
+- Saved controller-wake configuration and verification state.
 - Controller-to-root-hub wake topology.
 - All USB and PCI wake-enabled entries.
 
@@ -325,6 +392,12 @@ atv-couch-wake uninstall --purge --remove-runtime
 ```
 
 The uninstaller intentionally leaves `~/.android/adbkey*` alone because those keys may be used by other Android devices and tools. Revoke the computer from the TV's Developer options when desired.
+
+The privileged controller-wake udev rule is managed separately so removing the user application cannot silently require sudo. Remove it first with:
+
+```bash
+atv-couch-wake controller disable
+```
 
 ## Security
 

@@ -55,6 +55,18 @@ class BehaviorConfig:
 
 
 @dataclass
+class ControllerWakeConfig:
+    enabled: bool = False
+    controller_name: str = ""
+    usb_root: str = ""
+    pci_controller: str = ""
+    mode: str = "selective"
+    verified: bool = False
+    settle_delay_seconds: float = 0.0
+    rule_path: str = "/etc/udev/rules.d/90-atv-couch-wake-controller.rules"
+
+
+@dataclass
 class ServiceConfig:
     inhibitor_delay_max_seconds: float = 4.5
     ui_backend: str = "auto"
@@ -64,6 +76,7 @@ class ServiceConfig:
 class AppConfig:
     tv: TVConfig = field(default_factory=TVConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    controller_wake: ControllerWakeConfig = field(default_factory=ControllerWakeConfig)
     service: ServiceConfig = field(default_factory=ServiceConfig)
 
     @classmethod
@@ -75,17 +88,19 @@ class AppConfig:
                 return {}
             return {key: value for key, value in values.items() if key in allowed}
 
-        # Ignore fields from the pre-ADB configuration format. This allows an
-        # in-place upgrade before the user reruns setup to select a passthrough URI.
+        # Ignore fields from older configuration formats so in-place upgrades
+        # can load before the user reruns setup.
         return cls(
             tv=TVConfig(**accepted(TVConfig, "tv")),
             behavior=BehaviorConfig(**accepted(BehaviorConfig, "behavior")),
+            controller_wake=ControllerWakeConfig(**accepted(ControllerWakeConfig, "controller_wake")),
             service=ServiceConfig(**accepted(ServiceConfig, "service")),
         )
 
     def to_toml(self) -> str:
         t = self.tv
         b = self.behavior
+        c = self.controller_wake
         s = self.service
         return f"""# atv-couch-wake configuration
 
@@ -113,6 +128,16 @@ wake_settle_seconds = {b.wake_settle_seconds}
 input_settle_seconds = {b.input_settle_seconds}
 command_timeout_seconds = {b.command_timeout_seconds}
 connect_timeout_seconds = {b.connect_timeout_seconds}
+
+[controller_wake]
+enabled = {str(c.enabled).lower()}
+controller_name = {_toml_string(c.controller_name)}
+usb_root = {_toml_string(c.usb_root)}
+pci_controller = {_toml_string(c.pci_controller)}
+mode = {_toml_string(c.mode)}
+verified = {str(c.verified).lower()}
+settle_delay_seconds = {c.settle_delay_seconds}
+rule_path = {_toml_string(c.rule_path)}
 
 [service]
 inhibitor_delay_max_seconds = {s.inhibitor_delay_max_seconds}
