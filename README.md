@@ -12,11 +12,11 @@ Version 0.4 uses **ADB exclusively** for TV control and adds optional controller
 Please understand that this means this has not been tested nor will it work with non Android/GoogleTV's.  Other TV manufacturs may have similar functionality, and if you'd like to build on this project to support other TV's such as LG, Samsung, or Roku TV's you may submit a PR or build a standalone tool.
 
 > **Alpha software:** test wake, sleep, input switching, suspend, and shutdown on your own hardware before relying on it.
->
-> ## Known Limitations
->
-> - Not all controllers will support Wake fucntion,  Wake-on-LAN recommended as fallback in these cases, more on this below.
-> - Some TV manufactures may intentionally block this functionality and it is not possible to test all hardware I do not own.
+
+## Known Limitations
+
+- Not all controllers will support Wake fucntion,  Wake-on-LAN recommended as fallback in these cases, more on this below.
+- Some TV manufactures may intentionally block this functionality and it is not possible to test all hardware I do not own.
 
 ## Requirements
 
@@ -345,6 +345,8 @@ Quick setup summary:
 5. Send the magic packet from the phone. The PC wakes; `atv-couch-wake` then wakes the TV and selects the saved input.
 
 **System Services can aslo be used to persist Wake-on-LAN as well. Consult your distros documentation to determine the best method.***
+
+**Wake-on-LAN via wifi WoWLAN is availabe on some chipsets, but is far less universal than WoL, please research if this is possible with your configuration**
 
 Print this guide at any time:
 
