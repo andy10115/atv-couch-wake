@@ -328,6 +328,10 @@ In that case, **Wake-on-LAN from a phone is the best fallback**. You still get t
 
 Quick setup summary:
 
+**Bazzite users can enable Wake-on-Lan from the Bazzite Portal app or built in ujust command ```ujust toggle-wol``` and select the Enable, then Force Enable option.***
+
+**It is recommended to assign your PC a static IP address via your router or appropirate network configurations when using Wake-on-LAN**
+
 1. Prefer wired Ethernet and enable **Wake-on-LAN**, **PCIe wake**, or the equivalent option in BIOS/UEFI.
 2. Check the Ethernet interface with `ethtool <interface>` and look for `Supports Wake-on: g` and `Wake-on: g`.
 3. NetworkManager users can persist magic-packet wake with:
@@ -339,6 +343,8 @@ Quick setup summary:
    Reconnect the connection or reboot afterward.
 4. Install a reputable Wake-on-LAN app on the phone and add the PC's Ethernet MAC address. The simplest setup keeps the phone on the same LAN.
 5. Send the magic packet from the phone. The PC wakes; `atv-couch-wake` then wakes the TV and selects the saved input.
+
+**System Services can aslo be used to persist Wake-on-LAN as well. Consult your distros documentation to determine the best method.***
 
 Print this guide at any time:
 
