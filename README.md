@@ -1,6 +1,6 @@
 # atv-couch-wake
 
-`atv-couch-wake` gives a Linux couch-gaming PC console-like control of an Android TV or Google TV and builds on the work of https://gist.github.com/herpiko:
+`atv-couch-wake` gives a Linux couch-gaming PC console-like control of an Android TV or Google TV and builds on work found here:  https://gist.github.com/herpiko/bf3e7bb728dfb39a02c44b6482ae8da2 credit to Herpiko Dwi Aguno
 
 - TV sleeps before the PC suspends or shuts down.
 - TV wakes after the PC resumes or the user session starts.
