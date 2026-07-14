@@ -8,6 +8,7 @@
 - Controller USB-root wake state is checked and reported without changing hardware settings.
 
 Version 0.3 uses **ADB exclusively** for TV control. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
+
 Please understand that this means this has not been tested nor will it work with non Android/GoogleTV's.  Other TV manufacturs may have similar functionality, and if you'd like to build on this project to support other TV's such as LG, Samsung, or Roku TV's you may submit a PR or build a standalone tool.
 
 > **Alpha software:** test wake, sleep, input switching, suspend, and shutdown on your own hardware before relying on it.
@@ -17,6 +18,7 @@ Please understand that this means this has not been tested nor will it work with
 - Linux with systemd and an active per-user systemd manager.
 - Python 3.10 or newer.
 - Android TV or Google TV reachable over the local network.
+- Android TV with a static local IP address. (this is done in your router)
 - Android platform tools (`adb`) installed by your distribution.
 - Developer options and network/wireless debugging enabled on the TV.
 - A trusted local network. ADB is powerful; do not expose its port to the internet.
