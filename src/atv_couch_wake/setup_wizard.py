@@ -109,7 +109,7 @@ async def _authorize(ui: UI, controller: ADBController) -> None:
 async def _optional_wireless_pair(ui: UI, controller: ADBController) -> None:
     if not ui.confirm(
         "Wireless debugging pairing",
-        "Does the TV require a pairing code and show a separate pairing address/port? usually no",
+        "Does the TV require a pairing code and show a separate pairing address/port? (usually no)",
         default=False,
     ):
         return
