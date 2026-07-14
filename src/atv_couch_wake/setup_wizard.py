@@ -100,7 +100,7 @@ async def _authorize(ui: UI, controller: ADBController) -> None:
 async def _optional_wireless_pair(ui: UI, controller: ADBController) -> None:
     if not ui.confirm(
         "Wireless debugging pairing",
-        "Does the TV require a pairing code and show a separate pairing address/port?",
+        "Does the TV require a pairing code and show a separate pairing address/port? (usually no)",
         default=False,
     ):
         return
@@ -121,14 +121,14 @@ async def _test_power(ui: UI, controller: ADBController) -> None:
     ):
         return
 
-    ui.info("Power-off test", "Sending KEYCODE_SLEEP. The panel should turn off.")
+    ui.info("Power-off test", "Sending KEYCODE_SLEEP. The panel should turn off. (turn back on if successful)")
     off = await controller.set_power(False)
     if not off.success:
         raise TVControlError(off.message)
     if not ui.confirm("Power-off result", "Did the TV turn off?", default=True):
         raise TVControlError("The TV did not confirm the ADB sleep test.")
 
-    ui.info("Power-on test", "Waiting five seconds, then sending KEYCODE_WAKEUP.")
+    ui.info("Power-on test", "Waiting five seconds, then sending KEYCODE_WAKEUP. (test begins on next prompt)")
     await asyncio.sleep(5.0)
     on = await controller.set_power(True)
     if not on.success:
@@ -154,7 +154,7 @@ async def _choose_input(ui: UI, controller: ADBController, config: AppConfig) ->
     ui.info(
         "Input test",
         "Use the physical remote to open the Google TV Home screen or switch away from the gaming PC.\n\n"
-        "The wizard will now launch each passthrough input directly. Answer Yes when the PC's input appears.",
+        "The wizard will now launch each passthrough input directly. Answer Yes when the PC's input appears. (Test begins on next prompt)",
     )
 
     selected: TVInput | None = None
