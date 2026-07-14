@@ -72,6 +72,7 @@ async def handle_event(
         if event == "resume":
             if not behavior.on_resume:
                 return EventResult(event, False, True, "Resume automation is disabled.")
+            await asyncio.sleep(max(0.0, behavior.resume_delay_seconds))
             return await _wake_with_retries(event, controller, config)
         if event == "suspend":
             settle_delay = (

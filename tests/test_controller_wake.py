@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from atv_couch_wake.config import AppConfig
 from atv_couch_wake.controller_wake import (
+    configurable_paths,
+    controller_wake_reboot_required,
     render_all_roots_rule,
     render_selective_rule,
     save_all_roots,
@@ -25,6 +28,11 @@ class ControllerWakeTests(unittest.TestCase):
             pci_wakeup="enabled",
             root_armed=False,
         )
+
+    def test_configurable_paths_deduplicates_duplicate_input_interfaces(self) -> None:
+        duplicate = ControllerWakePath(**self.path.__dict__)
+        paths = configurable_paths([self.path, duplicate])
+        self.assertEqual(len(paths), 1)
 
     def test_selective_rule_targets_stable_root_and_pci(self) -> None:
         rule = render_selective_rule(self.path)
@@ -49,6 +57,15 @@ class ControllerWakeTests(unittest.TestCase):
         self.assertEqual(config.controller_wake.mode, "selective")
         self.assertFalse(config.controller_wake.verified)
         self.assertEqual(config.controller_wake.settle_delay_seconds, 2.0)
+
+    def test_reboot_required_only_during_configuring_boot(self) -> None:
+        config = AppConfig()
+        config.controller_wake.enabled = True
+        config.controller_wake.configured_boot_id = "boot-a"
+        with mock.patch("atv_couch_wake.controller_wake.current_boot_id", return_value="boot-a"):
+            self.assertTrue(controller_wake_reboot_required(config))
+        with mock.patch("atv_couch_wake.controller_wake.current_boot_id", return_value="boot-b"):
+            self.assertFalse(controller_wake_reboot_required(config))
 
     def test_save_all_roots(self) -> None:
         config = AppConfig()

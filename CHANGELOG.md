@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+- Reworked onboarding so optional failures do not abort or strand the main TV automation setup.
+- Power-control test failures now warn and continue instead of terminating setup.
+- Input discovery and input-test failures now degrade gracefully and preserve an existing saved input on reruns.
+- Controller-wake configuration no longer performs an automatic suspend test during onboarding.
+- The per-user lifecycle watcher is installed independently of controller-wake success.
+- Added a final setup summary showing verified, unverified, skipped, and installed features.
+- Added a required reboot boundary before controller-wake testing and stored the boot ID used when the wake rule was configured.
+- `controller test` now refuses to suspend during the same boot in which controller wake was configured.
+- Added a 5-second startup delay and a new 5-second resume delay before the first ADB wake attempt to reduce session/network/ADB race conditions.
+- Clarified that Wake-on-LAN is a manual fallback because configuration and persistence vary across distributions and hardware.
+- Added guidance to try another physical USB port when controller wake cannot be made reliable.
+
 ## 0.4.0
 
 - Added optional guided controller-to-PC wake configuration.

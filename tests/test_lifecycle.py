@@ -43,6 +43,23 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertEqual(controller.calls, 2)
 
+    async def test_resume_waits_for_configured_settle_delay(self) -> None:
+        config = AppConfig()
+        config.behavior.resume_delay_seconds = 5.0
+        with (
+            patch("atv_couch_wake.lifecycle.ADBController") as controller_cls,
+            patch("atv_couch_wake.lifecycle.asyncio.sleep", new=AsyncMock()) as sleep,
+            patch("atv_couch_wake.lifecycle._wake_with_retries", new=AsyncMock()) as wake,
+        ):
+            wake.return_value = __import__("atv_couch_wake.lifecycle", fromlist=["EventResult"]).EventResult(
+                "resume", True, True, "ok"
+            )
+            result = await handle_event("resume", config)
+        controller_cls.assert_called_once()
+        sleep.assert_awaited_once_with(5.0)
+        wake.assert_awaited_once()
+        self.assertTrue(result.success)
+
     async def test_suspend_settle_delay_runs_even_when_tv_poweroff_is_disabled(self) -> None:
         config = AppConfig()
         config.behavior.off_on_suspend = False

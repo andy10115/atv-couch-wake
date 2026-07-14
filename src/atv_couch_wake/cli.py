@@ -17,7 +17,11 @@ from .adb_control import (
     installation_help,
 )
 from .config import ControllerWakeConfig, load_config, save_config
-from .controller_wake import remove_wake_configuration, wol_fallback_summary
+from .controller_wake import (
+    controller_wake_reboot_required,
+    remove_wake_configuration,
+    wol_fallback_summary,
+)
 from .diagnostics import collect_diagnostics, diagnostics_json, render_controller_wake, render_diagnostics
 from .lifecycle import LogindWatcher, handle_event
 from .paths import AppPaths
@@ -69,7 +73,7 @@ def _parser() -> argparse.ArgumentParser:
     controller_sub = controller.add_subparsers(dest="controller_action", required=True)
     controller_setup = controller_sub.add_parser("setup", help="configure persistent controller wake")
     controller_setup.add_argument("--ui", choices=["auto", "terminal", "kdialog", "zenity"], default="auto")
-    controller_test = controller_sub.add_parser("test", help="run a real suspend/controller wake test")
+    controller_test = controller_sub.add_parser("test", help="run a post-reboot suspend/controller wake test")
     controller_test.add_argument("--ui", choices=["auto", "terminal", "kdialog", "zenity"], default="auto")
     controller_sub.add_parser("status", help="show saved controller wake configuration and topology")
     controller_sub.add_parser("disable", help="remove the persistent controller wake udev rule")
@@ -268,6 +272,7 @@ async def _run_async(args: argparse.Namespace, paths: AppPaths) -> int:
             print(f"PCI controller: {saved.pci_controller or 'none'}")
             print(f"settle delay: {saved.settle_delay_seconds:g} seconds")
             print(f"verified: {saved.verified}")
+            print(f"reboot required: {controller_wake_reboot_required(config)}")
             print(f"udev rule: {saved.rule_path}")
             return 0 if saved.enabled else 1
         if args.controller_action == "disable":

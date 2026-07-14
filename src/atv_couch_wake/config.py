@@ -45,7 +45,8 @@ class BehaviorConfig:
     off_on_shutdown: bool = True
     off_on_reboot: bool = False
     switch_input_after_wake: bool = True
-    startup_delay_seconds: float = 3.0
+    startup_delay_seconds: float = 5.0
+    resume_delay_seconds: float = 5.0
     wake_attempts: int = 5
     wake_retry_seconds: float = 2.0
     wake_settle_seconds: float = 2.0
@@ -64,6 +65,7 @@ class ControllerWakeConfig:
     verified: bool = False
     settle_delay_seconds: float = 0.0
     rule_path: str = "/etc/udev/rules.d/90-atv-couch-wake-controller.rules"
+    configured_boot_id: str = ""
 
 
 @dataclass
@@ -122,6 +124,7 @@ off_on_shutdown = {str(b.off_on_shutdown).lower()}
 off_on_reboot = {str(b.off_on_reboot).lower()}
 switch_input_after_wake = {str(b.switch_input_after_wake).lower()}
 startup_delay_seconds = {b.startup_delay_seconds}
+resume_delay_seconds = {b.resume_delay_seconds}
 wake_attempts = {b.wake_attempts}
 wake_retry_seconds = {b.wake_retry_seconds}
 wake_settle_seconds = {b.wake_settle_seconds}
@@ -138,6 +141,7 @@ mode = {_toml_string(c.mode)}
 verified = {str(c.verified).lower()}
 settle_delay_seconds = {c.settle_delay_seconds}
 rule_path = {_toml_string(c.rule_path)}
+configured_boot_id = {_toml_string(c.configured_boot_id)}
 
 [service]
 inhibitor_delay_max_seconds = {s.inhibitor_delay_max_seconds}

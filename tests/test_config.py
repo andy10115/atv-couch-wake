@@ -35,12 +35,14 @@ class ConfigTests(unittest.TestCase):
             )
             config.tv.input_label = "HDMI 3"
             config.behavior.off_on_reboot = True
+            config.behavior.resume_delay_seconds = 5.0
             config.controller_wake.enabled = True
             config.controller_wake.controller_name = "GameSir Cyclone 2"
             config.controller_wake.usb_root = "usb3"
             config.controller_wake.pci_controller = "0000:12:00.4"
             config.controller_wake.verified = True
             config.controller_wake.settle_delay_seconds = 2.0
+            config.controller_wake.configured_boot_id = "boot-123"
 
             save_config(config, paths)
             loaded = load_config(paths)
@@ -50,10 +52,12 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.tv.input_label, "HDMI 3")
             self.assertEqual(loaded.tv.serial, "10.0.0.42:5555")
             self.assertTrue(loaded.behavior.off_on_reboot)
+            self.assertEqual(loaded.behavior.resume_delay_seconds, 5.0)
             self.assertTrue(loaded.controller_wake.enabled)
             self.assertEqual(loaded.controller_wake.usb_root, "usb3")
             self.assertTrue(loaded.controller_wake.verified)
             self.assertEqual(loaded.controller_wake.settle_delay_seconds, 2.0)
+            self.assertEqual(loaded.controller_wake.configured_boot_id, "boot-123")
             self.assertEqual(paths.config_file.stat().st_mode & 0o777, 0o600)
 
     def test_missing_optional_config_returns_defaults(self) -> None:

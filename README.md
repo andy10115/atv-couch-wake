@@ -1,32 +1,34 @@
 # atv-couch-wake
 
-`atv-couch-wake` gives a Linux couch-gaming PC console-like control of an Android TV or Google TV and builds on work found here:  https://gist.github.com/herpiko/bf3e7bb728dfb39a02c44b6482ae8da2 credit to Herpiko Dwi Aguno
+`atv-couch-wake` gives a Linux couch-gaming PC console-like control of an Android TV or Google TV. It builds on earlier HTPC integration work by [Herpiko Dwi Aguno](https://gist.github.com/herpiko/bf3e7bb728dfb39a02c44b6482ae8da2):
 
 - TV sleeps before the PC suspends or shuts down.
 - TV wakes after the PC resumes or the user session starts.
 - The TV switches directly to the saved physical input through Android's TV Input Framework.
 - When hardware permits it, a USB controller or wireless controller dongle can wake the PC from suspend.
 
-Version 0.4 uses **ADB exclusively** for TV control and adds optional controller-to-PC wake configuration. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
+Version 0.5 uses **ADB exclusively** for TV control and focuses on resilient onboarding, startup/resume timing, and optional controller-to-PC wake configuration. It does not rely on HDMI-CEC or Android remote-protocol input keycodes.
 
-Please understand that this means this has not been tested nor will it work with non Android/GoogleTV's.  Other TV manufacturs may have similar functionality, and if you'd like to build on this project to support other TV's such as LG, Samsung, or Roku TV's you may submit a PR or build a standalone tool.
+This project is designed for Android TV and Google TV devices and has not been tested with non-Android TV platforms. Other manufacturers may expose similar functionality; contributions adding support for platforms such as LG, Samsung, or Roku are welcome, either as a pull request or as a separate tool.
 
 > **Alpha software:** test wake, sleep, input switching, suspend, and shutdown on your own hardware before relying on it.
 
-## Known Limitations
+## Known limitations
 
-- Not all controllers will support Wake fucntion,  Wake-on-LAN recommended as fallback in these cases, more on this below.
-- Some TV manufactures may intentionally block this functionality and it is not possible to test all hardware I do not own.
+- Not all controllers or wireless dongles can wake a PC from suspend, even when Linux wake settings are configured correctly. Wake-on-LAN is the recommended fallback when controller wake is not supported.
+- TV manufacturers can restrict or change ADB, standby networking, power behavior, or Android TV Input Framework support. It is not possible to test every TV model or firmware version.
+- Controller wake can depend on BIOS/UEFI settings, USB topology, the controller or dongle revision, and the system's suspend mode.
+
 
 ## Requirements
 
 - Linux with systemd and an active per-user systemd manager.
 - Python 3.10 or newer.
 - Android TV or Google TV reachable over the local network.
+- **Recommended:** a DHCP reservation or other stable local IP address for the TV, usually configured on the router.
 - Android platform tools (`adb`) installed by your distribution.
 - Developer options and network/wireless debugging enabled on the TV.
 - A trusted local network. ADB is powerful; do not expose its port to the internet.
-- **Recommended** - Android TV with a static local IP address. (this is done on your router)
 
 ### Install ADB first
 
@@ -137,11 +139,15 @@ The wizard:
 10. Asks which startup, suspend, resume, shutdown, and reboot behaviors to enable.
 11. Detects likely USB controllers and wireless controller dongles and traces them to their USB root hub and parent PCI controller.
 12. Optionally uses one-time `sudo` authorization to install a persistent udev rule that enables wake on the selected stable hardware path.
-13. Offers a real suspend/resume test and records whether controller wake was actually verified.
-14. Explains the Wake-on-LAN phone fallback when controller wake is unavailable or fails.
-15. Offers to install a **per-user** systemd watcher.
+13. Configures controller wake without suspending the PC during onboarding.
+14. Installs and starts the **per-user** systemd watcher independently of controller-wake success.
+15. Summarizes exactly which features were verified, skipped, or left unverified.
+16. When controller wake was configured, requires a reboot before testing and explains the post-reboot test flow.
+17. Explains Wake-on-LAN as a manual fallback when controller wake is unavailable or fails.
 
 The TV will display an authorization prompt during the first connection. Select **Always allow from this computer** before accepting it.
+
+Optional tests are non-fatal. A failed power test, missing input switch, unavailable controller path, or failed controller-wake configuration does **not** prevent the TV lifecycle watcher from being installed. Existing saved input configuration is preserved when a rerun cannot rediscover or reconfirm an input.
 
 ## Manual verification
 
@@ -269,6 +275,8 @@ The unit is installed at:
 
 The watcher connects to the system logind D-Bus API, holds a delay inhibitor, and listens for suspend/resume and shutdown/reboot signals. This lets the ADB sleep command run before network teardown while remaining a distro-agnostic user service.
 
+Startup and resume wake operations wait **5 seconds** before the first ADB attempt. This intentionally gives the user session, network stack, ADB transport, and TV standby services time to settle. The existing ADB retry logic remains in place after that delay.
+
 The user must have an active systemd user session. Couch-oriented distributions that automatically log into Gaming Mode satisfy this naturally.
 
 ## Controller wake
@@ -287,9 +295,10 @@ The setup flow:
 2. Traces the selected device to its USB root hub and parent PCI USB controller.
 3. Enables wake on the stable root-hub path rather than the temporary leaf device. This allows wireless dongles to re-enumerate or change identity without losing the wake configuration.
 4. Installs `/etc/udev/rules.d/90-atv-couch-wake-controller.rules` using one-time `sudo` authorization.
-5. Applies the setting immediately for the current boot.
+5. Applies the wake setting to the current sysfs path and installs the persistent rule for future boots.
 6. Optionally adds a short pre-suspend settling delay for dongles that re-enumerate when the controller connects or disconnects.
-7. Offers a real suspend test and records whether controller wake was actually verified.
+7. Requires a reboot before controller wake is tested so the udev rule, USB topology, and user watcher all start from a clean boot.
+8. After reboot, the user suspends normally, waits until the PC is fully asleep, and then turns the controller back on.
 
 The TV lifecycle watcher remains a **per-user** systemd service. Controller wake does not install a root daemon or a system-level systemd service; only the persistent udev hardware rule is privileged.
 
@@ -300,7 +309,7 @@ atv-couch-wake controller status
 atv-couch-wake test usb-wake
 ```
 
-Retest after changing ports, firmware, BIOS settings, or controllers:
+Retest after changing ports, firmware, BIOS settings, or controllers. The command refuses to suspend during the same boot in which controller wake was configured; reboot first:
 
 ```bash
 atv-couch-wake controller test
@@ -326,27 +335,30 @@ This is an unavoidable hardware limitation on some systems. A controller may wor
 
 In that case, **Wake-on-LAN from a phone is the best fallback**. You still get the same TV behavior: the phone wakes the PC, then `atv-couch-wake` sees the resume/startup event, wakes the TV, and switches to the gaming input. The only difference is that the first wake comes from the phone instead of the controller.
 
-Quick setup summary:
+Wake-on-LAN setup varies across distributions, network managers, NIC drivers, firmware, and motherboard settings, so `atv-couch-wake` deliberately does **not** configure it automatically. Use the method recommended by your distribution and hardware.
 
-**Bazzite users can enable Wake-on-Lan from the Bazzite Portal app or built in ujust command ```ujust toggle-wol``` and select the Enable, then Force Enable option.***
+A practical setup is:
 
-**It is recommended to assign your PC a static IP address via your router or appropirate network configurations when using Wake-on-LAN**
-
-1. Prefer wired Ethernet and enable **Wake-on-LAN**, **PCIe wake**, or the equivalent option in BIOS/UEFI.
+1. Prefer wired Ethernet and enable **Wake-on-LAN**, **PCIe wake**, **PME wake**, or the equivalent option in BIOS/UEFI.
 2. Check the Ethernet interface with `ethtool <interface>` and look for `Supports Wake-on: g` and `Wake-on: g`.
-3. NetworkManager users can persist magic-packet wake with:
+3. Configure persistent Wake-on-LAN using the method recommended by your distribution or network manager.
+   - **Bazzite:** Wake-on-LAN can be enabled from the Bazzite Portal or with `ujust toggle-wol`; choose **Enable**, then **Force Enable** when appropriate for your hardware.
+   - **NetworkManager:** some distributions persist magic-packet wake with:
 
-   ```bash
-   nmcli connection modify "<connection name>" 802-3-ethernet.wake-on-lan magic
-   ```
+     ```bash
+     nmcli connection modify "<connection name>" 802-3-ethernet.wake-on-lan magic
+     ```
 
-   Reconnect the connection or reboot afterward.
-4. Install a reputable Wake-on-LAN app on the phone and add the PC's Ethernet MAC address. The simplest setup keeps the phone on the same LAN.
-5. Send the magic packet from the phone. The PC wakes; `atv-couch-wake` then wakes the TV and selects the saved input.
+     This is not universal, so consult your distribution's documentation if it does not persist reliably.
+   - A system service using `ethtool` is another common persistence method on some distributions.
+4. Add the PC's Ethernet MAC address to a reputable Wake-on-LAN app on your phone. The simplest setup keeps the phone on the same LAN.
+5. Send the magic packet from the phone.
 
-**System Services can aslo be used to persist Wake-on-LAN as well. Consult your distros documentation to determine the best method.***
+A stable IP address for the PC is recommended for convenience, although Wake-on-LAN itself targets the network adapter's MAC address.
 
-**Wake-on-LAN via wifi WoWLAN is availabe on some chipsets, but is far less universal than WoL, please research if this is possible with your configuration**
+Wake-on-LAN over Wi-Fi, commonly called **WoWLAN**, is available on some chipsets but is much less universal than wired Wake-on-LAN. Support depends on the Wi-Fi chipset, firmware, driver, platform, and suspend mode.
+
+Once Wake-on-LAN wakes the PC, `atv-couch-wake` still handles the rest: it waits for the user session and network to settle, wakes the TV, and selects the saved input.
 
 Print this guide at any time:
 
