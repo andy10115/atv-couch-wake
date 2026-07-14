@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixed a startup/resume race where the lifecycle watcher could attempt to reach the TV over adb before the network interface had finished associating/obtaining a DHCP lease, causing intermittent "TV doesn't turn on" failures on boot in particular. Startup and resume now actively poll for adb to become reachable and authorized (up to a configurable ceiling) instead of trusting a fixed delay to outlast network bring-up.
+- Added `adb_ready_timeout_seconds` and `adb_ready_poll_seconds` to `[behavior]` config; reduced `startup_delay_seconds`/`resume_delay_seconds` to a small pre-poll grace period now that the poll loop does the real waiting.
+- The per-user systemd watcher unit now declares `After=network-online.target` and `Wants=network-online.target`, so it won't even start until the system reports the network as online (on distros where a network-online provider service is enabled; the adb readiness poll is the primary fix and works regardless).
+
 ## 0.5.0
 
 - Reworked onboarding so optional failures do not abort or strand the main TV automation setup.

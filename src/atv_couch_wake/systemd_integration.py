@@ -31,6 +31,8 @@ def render_user_unit(python_executable: str | None = None) -> str:
     return f"""[Unit]
 Description=atv-couch-wake lifecycle watcher
 Documentation=https://github.com/andy10115/atv-couch-wake
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

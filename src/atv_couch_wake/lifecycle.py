@@ -51,6 +51,55 @@ async def _wake_with_retries(
     return EventResult(event, True, False, last_message)
 
 
+async def _wait_for_adb_ready(
+    controller: ADBController,
+    config: AppConfig,
+    event: str,
+    grace_seconds: float,
+) -> bool:
+    """
+    Poll until adb can actually reach and authenticate with the TV, instead
+    of trusting a flat sleep. On boot in particular, the watcher can start
+    before the network interface has associated/gotten a DHCP lease -
+    firing `adb connect` at that point fails fast (not a slow timeout), so
+    a short fixed delay can expire before the network is actually usable.
+    Polling the real dependency removes that race regardless of whether
+    network-online.target is meaningfully wired up on a given system.
+    """
+    if grace_seconds > 0:
+        await asyncio.sleep(grace_seconds)
+
+    deadline = max(0.0, config.behavior.adb_ready_timeout_seconds)
+    interval = max(0.1, config.behavior.adb_ready_poll_seconds)
+    elapsed = 0.0
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            await controller.ensure_authorized()
+            LOGGER.info(
+                "Lifecycle event %s: adb ready after %.1fs grace + %.1fs poll (%d attempt(s))",
+                event,
+                grace_seconds,
+                elapsed,
+                attempts,
+            )
+            return True
+        except TVControlError as exc:
+            if elapsed >= deadline:
+                LOGGER.warning(
+                    "Lifecycle event %s: adb not ready after %.1fs grace + %.1fs poll (%d attempt(s)): %s",
+                    event,
+                    grace_seconds,
+                    elapsed,
+                    attempts,
+                    exc,
+                )
+                return False
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+
 async def handle_event(
     event: str,
     config: AppConfig | None = None,
@@ -67,12 +116,28 @@ async def handle_event(
         if event == "startup":
             if not behavior.on_startup:
                 return EventResult(event, False, True, "Startup automation is disabled.")
-            await asyncio.sleep(max(0.0, behavior.startup_delay_seconds))
+            ready = await _wait_for_adb_ready(controller, config, event, behavior.startup_delay_seconds)
+            if not ready:
+                total = behavior.startup_delay_seconds + behavior.adb_ready_timeout_seconds
+                return EventResult(
+                    event,
+                    True,
+                    False,
+                    f"adb did not become reachable within {total:g}s; TV was not woken.",
+                )
             return await _wake_with_retries(event, controller, config)
         if event == "resume":
             if not behavior.on_resume:
                 return EventResult(event, False, True, "Resume automation is disabled.")
-            await asyncio.sleep(max(0.0, behavior.resume_delay_seconds))
+            ready = await _wait_for_adb_ready(controller, config, event, behavior.resume_delay_seconds)
+            if not ready:
+                total = behavior.resume_delay_seconds + behavior.adb_ready_timeout_seconds
+                return EventResult(
+                    event,
+                    True,
+                    False,
+                    f"adb did not become reachable within {total:g}s; TV was not woken.",
+                )
             return await _wake_with_retries(event, controller, config)
         if event == "suspend":
             settle_delay = (

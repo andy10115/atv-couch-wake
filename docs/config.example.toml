@@ -17,8 +17,14 @@ off_on_suspend = true
 off_on_shutdown = true
 off_on_reboot = false
 switch_input_after_wake = true
-startup_delay_seconds = 5.0
-resume_delay_seconds = 5.0
+# Small grace pause before the first readiness check - not the real wait.
+startup_delay_seconds = 1.0
+resume_delay_seconds = 1.0
+# The real fix for boot/resume races: actively poll adb until it's reachable
+# and authorized, instead of trusting a fixed delay to outlast network
+# bring-up. Raise adb_ready_timeout_seconds if your network/TV are slow.
+adb_ready_timeout_seconds = 45.0
+adb_ready_poll_seconds = 1.5
 wake_attempts = 5
 wake_retry_seconds = 2.0
 wake_settle_seconds = 2.0

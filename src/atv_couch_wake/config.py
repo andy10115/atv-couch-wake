@@ -45,8 +45,18 @@ class BehaviorConfig:
     off_on_shutdown: bool = True
     off_on_reboot: bool = False
     switch_input_after_wake: bool = True
-    startup_delay_seconds: float = 5.0
-    resume_delay_seconds: float = 5.0
+    # Flat grace period before the FIRST adb readiness poll on startup/resume.
+    # Kept small - the real wait now happens in the poll loop below, this is
+    # just a courtesy pause so the first attempt isn't guaranteed to fail.
+    startup_delay_seconds: float = 1.0
+    resume_delay_seconds: float = 1.0
+    # How long to actively poll for adb to become reachable/authorized before
+    # giving up on a startup/resume event. This is the real fix for the
+    # boot-time race: rather than trusting a fixed sleep to outlast network
+    # bring-up, we poll the actual dependency (adb connect + auth) and only
+    # proceed once it's genuinely ready, up to this ceiling.
+    adb_ready_timeout_seconds: float = 45.0
+    adb_ready_poll_seconds: float = 1.5
     wake_attempts: int = 5
     wake_retry_seconds: float = 2.0
     wake_settle_seconds: float = 2.0
@@ -125,6 +135,8 @@ off_on_reboot = {str(b.off_on_reboot).lower()}
 switch_input_after_wake = {str(b.switch_input_after_wake).lower()}
 startup_delay_seconds = {b.startup_delay_seconds}
 resume_delay_seconds = {b.resume_delay_seconds}
+adb_ready_timeout_seconds = {b.adb_ready_timeout_seconds}
+adb_ready_poll_seconds = {b.adb_ready_poll_seconds}
 wake_attempts = {b.wake_attempts}
 wake_retry_seconds = {b.wake_retry_seconds}
 wake_settle_seconds = {b.wake_settle_seconds}
