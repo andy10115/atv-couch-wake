@@ -56,7 +56,7 @@ Install it with your distribution's supported package method, then rerun this in
   Fedora:                sudo dnf install android-tools
   Debian / Ubuntu:       sudo apt install adb
   openSUSE:              sudo zypper install android-tools
-  Bazzite:               use Bazzite's supported ujust/portal recipe for Android platform tools
+  Bazzite:               use the Bazzite Portal option for Android platform tools
 
 atv-couch-wake does not install or layer system packages automatically.
 ADBHELP
