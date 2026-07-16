@@ -48,7 +48,7 @@ sudo apt install adb
 sudo zypper install android-tools
 ```
 
-On Bazzite, use Bazzite's supported `ujust` recipe or portal option for Android platform tools before running the installer.
+On Bazzite, use the Bazzite Portal option for Android platform tools before running the installer.
 
 Verify:
 
@@ -90,6 +90,8 @@ Look under **Settings → Network & Internet**. A DHCP reservation is recommende
 ## Installation
 
 From GitHub:
+
+Bazzite - Use the Bazzite Portal app to install.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andy10115/atv-couch-wake/main/install.sh | bash
